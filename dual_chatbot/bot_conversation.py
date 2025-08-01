@@ -9,6 +9,8 @@ from openai import OpenAI
 load_dotenv()
 
 LEAD_NAME = "Katia Alonso"
+REALTOR_NAME = "João Silva"
+LEAD_PHONE = "5511912345678"
 
 # ----- System Messages -----
 
@@ -24,9 +26,9 @@ def lead_system_message() -> Dict[str, str]:
 
 
 def agent_system_message(
-    realtor_name: str = "the realtor",
+    realtor_name: str = REALTOR_NAME,
     lead_name: str = LEAD_NAME,
-    phone: str = "",
+    phone: str = LEAD_PHONE,
     calendar_use: bool = True,
 ) -> Dict[str, str]:
     """Return the system message used for the agent."""
