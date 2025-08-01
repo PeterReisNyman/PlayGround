@@ -1,182 +1,245 @@
-import argparse
 import json
-import os
-import openai
-from transformers import pipeline
+from openai import OpenAI
 
+LEAD_NAME = "Katia Alonso"
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Dual chatbot")
-    parser.add_argument(
-        "--seller-model",
-        choices=["openai", "xai"],
-        default="openai",
-        help="Model to use for the seller agent",
-    )
-    parser.add_argument(
-        "--buyer-model",
-        choices=["openai", "xai"],
-        default="openai",
-        help="Model to use for the buyer agent",
-    )
-    return parser.parse_args()
+roles = ["lead", "agent"]
 
+def lead_system_message():
+    """System message for the lead"""
+    return {
+        "role": "system",
+        "content": f"You are the lead {LEAD_NAME}. Your role is to be midly intrested in selling a house. TRY TO USE ALL OF THE TOOLS",
+    }
 
-def load_system_messages(path: str):
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+def agent_system_message():
+    """System message for the agent"""
+    return {
+        "role": "system",
+        "content": "You are the agent in a dual chatbot conversation. Your role is to assist the lead and provide relevant information.",
+    }
 
 
 def stop():
-    """Tool that ends the conversation"""
+    print("""Tool that ends the conversation""")
     return {"message": "stop"}
 
-
-def info(role: str):
-    """Tool that tells the agent its role"""
-    if role == 'seller':
-        return {"message": "you are the seller"}
-    return {"message": "you are the buyer"}
-
-
-def seller_secret():
-    """Private tool only visible to the seller"""
-    return {"secret": "seller data"}
-
-
-def buyer_secret():
-    """Private tool only visible to the buyer"""
-    return {"secret": "buyer data"}
-
-
-def call_openai(role: str, conversation, tools):
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=conversation,
-        tools=tools,
-    )
-    message = response["choices"][0]["message"]
-    conversation.append(message)
-    print(f"{role.capitalize()}:", message.get("content"))
-    stop_conversation = False
-    if message.get("tool_calls"):
-        for call in message["tool_calls"]:
-            name = call["function"]["name"]
-            if name == "stop":
-                print("Conversation stopped by tool.")
-                stop_conversation = True
-            elif name == "info":
-                info_msg = info(role)
-                conversation.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps(info_msg),
-                    }
-                )
-            elif name == "seller_secret" and role == "seller":
-                secret_msg = seller_secret()
-                conversation.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps(secret_msg),
-                    }
-                )
-            elif name == "buyer_secret" and role == "buyer":
-                secret_msg = buyer_secret()
-                conversation.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps(secret_msg),
-                    }
-                )
-    return stop_conversation
-
-
-def call_xai(role: str, conversation, pipe):
-    prompt = "\n".join(f"{m['role']}: {m['content']}" for m in conversation)
-    if len(prompt.split()) > 200:
-        prompt_words = prompt.split()
-        prompt = " ".join(prompt_words[-200:])
-    generated = pipe(prompt, max_new_tokens=50)[0]["generated_text"]
-    generated = generated[len(prompt) :].strip()
-    conversation.append({"role": role, "content": generated})
-    print(f"{role.capitalize()}:", generated)
-    return False
-
-
-def main():
-    args = parse_args()
-
-    messages = load_system_messages(os.path.join(os.path.dirname(__file__), "system_messages.json"))
-
-    openai.api_key = os.getenv("OPENAI_API_KEY", "")
-
-    pipe = pipeline("text-generation", model="distilgpt2")
-
-    conversation = [
-        {"role": "system", "content": messages["seller"]},
-        {"role": "system", "content": messages["buyer"]},
-    ]
-
-    public_tools = [
-        {
+stop_tool = {
             "type": "function",
             "function": {
                 "name": "stop",
                 "description": "Stop the conversation",
                 "parameters": {"type": "object", "properties": {}},
-            },
-        },
-        {
+            }
+        }
+
+
+def info(role: str):
+    print("""Tool that tells the agent its role""")
+    if role == 'lead':
+        return {"message": "you are the lead"}
+    return {"message": "you are the agent"}
+
+info_tool = {
             "type": "function",
             "function": {
                 "name": "info",
                 "description": "Get the agent role information",
                 "parameters": {"type": "object", "properties": {}},
-            },
-        },
-    ]
+            }
+        }
 
-    seller_private = [
-        {
+
+def lead_secret():
+    print("""Private tool only visible to the lead""")
+    return {"secret": "lead data"}
+
+
+lead_secret_tool = {
             "type": "function",
             "function": {
-                "name": "seller_secret",
-                "description": "Seller private function",
+                "name": "lead_secret",
+                "description": "lead private function",
                 "parameters": {"type": "object", "properties": {}},
-            },
+            }
         }
-    ]
 
-    buyer_private = [
-        {
+def agent_secret():
+    print("""Private tool only visible to the agent""")
+    return {"secret": "agent data"}
+
+agent_secret_tool = {
             "type": "function",
             "function": {
-                "name": "buyer_secret",
-                "description": "Buyer private function",
+                "name": "agent_secret",
+                "description": "agent private function",
                 "parameters": {"type": "object", "properties": {}},
-            },
+            }
         }
-    ]
 
-    models = {"seller": args.seller_model, "buyer": args.buyer_model}
 
-    role_cycle = [("seller", messages["seller"]), ("buyer", messages["buyer"])]
+def call_openai(params):
+    if params['openai']:
+        api_key="sk--"
+        client = OpenAI(api_key=api_key)
+    if params['xai']:
+        api_key="xai-"
+        client = OpenAI(api_key=api_key,base_url='https://api.x.ai/v1')
 
-    for i in range(30):
-        role, _ = role_cycle[i % 2]
-        model = models[role]
-        if model == "openai":
-            tools = public_tools + (seller_private if role == "seller" else buyer_private)
-            stop_conv = call_openai(role, conversation, tools)
-            if stop_conv:
-                return
+    model = params['model']
+    messages = params['messages']
+    tools = params.get('tools')
+    
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools
+        )
+        return response.choices[0].message
+    except Exception as e:
+        print(f"Error in text_to_text: {e}")
+        raise e
+
+def agent(role: str, conversation):
+    
+    if role == "lead":
+        model = "gpt-4.1-nano"
+        system_msg = lead_system_message()
+        xai = False
+        openai = True
+        tools = [stop_tool, info_tool, lead_secret_tool]
+    else:
+        model = "gpt-4.1-nano"
+        system_msg = agent_system_message()
+        xai = False
+        openai = True
+        tools = [stop_tool, info_tool, agent_secret_tool]
+
+    messages = [system_msg]
+
+    for i in conversation:
+        if i["role"] == role:
+            if i["content"] != None:
+                messages.append({"role": "assistant", "content": i["content"]})
+            else:
+                messages.append({"role": "assistant", "content": "", "tool_calls": i["tool_calls"]})
+        elif i["role"] == "tool":
+            if i["call"] == role:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": i["tool_call_id"],
+                    "content": json.dumps(i["content"]),
+                })
+        elif i["content"] != None:
+            messages.append({"role": "user", "content": i["content"]})
+    print("\n\n")
+    for msg in messages:
+        print(msg)
+    print("\n\n")
+    params = {
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "openai": openai,
+        "xai": xai
+    }
+
+    stop_conversation = False
+
+    while True:
+        response_message = call_openai(params)
+
+        if response_message.tool_calls:
+            messages.append({
+                "role": "assistant",
+                "content": response_message.content,
+                "tool_calls": [{
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                } for tc in response_message.tool_calls]
+            })
+
+            conversation.append({
+                "role": role,
+                "content": response_message.content,
+                "tool_calls": [{
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                } for tc in response_message.tool_calls]
+            })
+
+            for call in response_message.tool_calls:
+                name = call.function.name
+                if name == "stop":
+                    tool_msg = stop()
+                    stop_conversation = True
+                elif name == "info":
+                    tool_msg = info(role)
+                elif name == "lead_secret" and role == "lead":
+                    tool_msg = lead_secret()
+                elif name == "agent_secret" and role == "agent":
+                    tool_msg = agent_secret()
+                else:
+                    continue
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(tool_msg),
+                    }
+                )
+                conversation.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(tool_msg),
+                        "call": role,
+                    }
+                )
         else:
-            call_xai(role, conversation, pipe)
+            final_content = response_message.content
+            conversation.append(
+                {
+                    "role": role,
+                    "content": final_content,
+                }
+            )
+            break
 
+    return conversation, stop_conversation
+
+
+
+def main():
+    conversation = [
+        {
+            "role": "agent",
+            "content": f"Olá {LEAD_NAME}, obrigado por dedicar um tempo para preencher a pesquisa de avaliação do imóvel. Para refinar a sua estimativa, gostaria de fazer algumas perguntas rápidas."
+        }
+    ]
+    role_cycle = ["lead", "agent"]
+
+    for i in range(3):
+        role = role_cycle[i % 2]
+
+        conversation, stop_conversation = agent(conversation=conversation, role=role)
+
+        print("\n\n")
+        for msg in conversation:
+            print(msg)
+        print("\n\n")
+        if stop_conversation:
+            break
+        
 
 if __name__ == "__main__":
     main()
