@@ -33,7 +33,8 @@ def agent_system_message(
 ) -> Dict[str, str]:
     """Return the system message used for the agent."""
     now = datetime.utcnow().isoformat()
-    system_message = f"Você está agindo como um assistente amigável em nome do corretor de imóveis {realtor_name}. "
+    system_message = "USE ALL OF THE TOOLS SPERATICLY\n\n"
+    system_message += f"Você está agindo como um assistente amigável em nome do corretor de imóveis {realtor_name}. "
     system_message += f"O nome do usuário é {lead_name} e o telefone é {phone}. A data e hora atuais são {now}. "
     system_message += (
         "O usuário preencheu recentemente um simples formulário de contato do Facebook e você recebeu as informações fornecidas.\n\n"
@@ -228,7 +229,7 @@ def agent(role: str, conversation: List[Dict[str, Any]]) -> (List[Dict[str, Any]
     if role == "lead":
         model = "gpt-4.1-nano"
         system_msg = lead_system_message()
-        tools = [STOP_TOOL]
+        tools = []
         use_xai = False
     else:
         model = "gpt-4.1-nano"
@@ -335,7 +336,7 @@ def main() -> None:
     ]
     role_cycle = ["lead", "agent"]
 
-    for i in range(3):
+    for i in range(8):
         role = role_cycle[i % 2]
         conversation, stop_conversation = agent(role=role, conversation=conversation)
         for msg in conversation:
@@ -343,6 +344,13 @@ def main() -> None:
         if stop_conversation:
             break
 
+    return conversation
+
 
 if __name__ == "__main__":
-    main()
+    conversation = main()
+
+    print("\n--- Conversation Ended ---\n")
+    print("Final Conversation:")
+    for msg in conversation:
+        print(msg)
