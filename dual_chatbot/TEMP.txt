@@ -1,70 +1,20 @@
-change number_of_bought_leads with tier_value, add also two filed to realtor table being ad_budget and last_refill
+create an end to end test:
 
-add also an new ad functionality that will fill up one singular meta ad as seen in the following code, (the following code is more of an example for you to understand how the actual code should work)
-
-
-
-
-
-import random
-
-def buy_credits(realtor, amount):
-    """Add purchased credits to the realtor's remaining credits and update their tier value to the new total."""
-    new_total = amount + realtor['remaining_credits']
-    realtor['tier_value'] = new_total
-    realtor['remaining_credits'] = new_total
-
-def get_leads_per_day(tier_value):
-    """Determine the leads per day based on the realtor's tier value."""
-    for r in ranges:
-        if r['min'] <= tier_value <= r['max']:
-            return r['leads_per_day']
-    return 0
-
-# Define the tier ranges for leads per day
-ranges = [
-    {'min': 1, 'max': 5, 'leads_per_day': 1},
-    {'min': 6, 'max': 10, 'leads_per_day': 2},
-    {'min': 11, 'max': 20, 'leads_per_day': 3},
-    {'min': 21, 'max': 40, 'leads_per_day': 4},
-    {'min': 41, 'max': 999999999, 'leads_per_day': 5}
-]
-
-# List of realtors with their details, including ad properties
-realtors = [
-    {'name': 'João', 'tier_value': 10, 'remaining_credits': 10, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Maria', 'tier_value': 12, 'remaining_credits': 12, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Carlos', 'tier_value': 8, 'remaining_credits': 8, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Ana', 'tier_value': 90, 'remaining_credits': 90, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Pedro', 'tier_value': 11, 'remaining_credits': 11, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Fernanda', 'tier_value': 7, 'remaining_credits': 7, 'ad_budget': 0, 'last_refill_hour': -24},
-    {'name': 'Roberto', 'tier_value': 10, 'remaining_credits': 10, 'ad_budget': 0, 'last_refill_hour': -24}
-]
-
-# Simulation over 6 days (144 hours)
-for h in range(144):
-    print(f"\n--- hour: {h} ---")
+for _ in range(10):
+    make a realotr complete the onbording
+    enter their name and untogle the button: "Use nossa função de calendário integrada"
+    enter their perfil 
+        including actual bairros in sao paulo
+        actual home types in portugese
+        an minum size
+        an minum amout of rooms
     
-    # Calculate and print total credits (sum of all ad budgets)
-    total_credits = sum(realtor['ad_budget'] for realtor in realtors)
-    print(f"Total credits at the start of the hour: {total_credits}")
-    
-    # Random events: realtors may buy more credits (simulating ad campaign responses)
-    # Probability: 1% per hour per realtor; amount: random between 1 and 20
-    for realtor in realtors:
-        print(realtor)
-        if random.random() < 0.01:
-            amount = random.randint(1, 20)
-            buy_credits(realtor, amount)
-            print(f"{realtor['name']} bought {amount} credits. Now remaining: {realtor['remaining_credits']}, tier: {realtor['tier_value']}")
-    
-    # Check and refill ads if 24 hours have passed since last refill
-    for realtor in realtors:
-        if h - realtor['last_refill_hour'] >= 24:
-            leads_per_day = get_leads_per_day(realtor['tier_value'])
-            input_credit = min(leads_per_day, realtor['remaining_credits'])
-            realtor['remaining_credits'] -= input_credit
-            realtor['ad_budget'] = input_credit
-            if input_credit > 0:
-                realtor['last_refill_hour'] = h
-            print(f"Ad for {realtor['name']} updated with {input_credit} credits")
+    then make each of them buy a random amount of leads
+
+then the test should check if all of the realtors correctly got thier information created,
+if the ad was correctly filed up (then delte them after)
+
+then simulate 10 leads talking to the ai,
+and see if the leads were correctly distrubuted.
+
+the test should simulate the leads pressing buttons.

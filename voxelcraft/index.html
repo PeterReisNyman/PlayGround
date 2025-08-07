@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voxelcraft - Minimal Long Horizon Voxel World</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #87b1ff; }
+      #overlay { position: absolute; top: 10px; left: 10px; color: #fff; font: 14px/1.4 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+      #instructions { opacity: 0.9; }
+      #debug { margin-top: 8px; font-size: 12px; opacity: 0.85; }
+      #lock { display: inline-block; padding: 6px 10px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="overlay">
+      <div id="instructions">
+        <span id="lock">Click to Lock Pointer</span><br/>
+        WASD = move, Space/Shift = up/down, Mouse = look<br/>
+        Horizon fog enabled; increase view with [+], decrease with [-].
+      </div>
+      <div id="debug"></div>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+  </html>
+
