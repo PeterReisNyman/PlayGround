@@ -4,12 +4,7 @@
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl', { antialias: false });
 if (!gl) alert('WebGL not supported');
-// Minimap canvas and state
-const minimapCanvas = document.getElementById('minimap');
-const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
-let minimapVisible = true;
-const minimapWrap = document.getElementById('minimapWrap');
-if (minimapWrap) minimapWrap.style.display = minimapVisible ? 'flex' : 'none';
+// Minimap removed
 
 function resize() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -44,7 +39,7 @@ try{
     if(typeof s.seedStr==='string'){ worldSeedStr=s.seedStr; worldSeed=hashString32(worldSeedStr); }
   }
 }catch{}
-if (minimapCanvas) { minimapCanvas.width = 160; minimapCanvas.height = 160; }
+// Minimap removed
 function setWorldSeed(str){
   worldSeedStr = String(str||'default');
   worldSeed = hashString32(worldSeedStr);
@@ -125,7 +120,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 // Toggle walk/fly mode with G, fog +/- and number keys 1..8 to select blocks
 window.addEventListener('keydown', (e)=>{
   const k = e.key;
-  if (k.toLowerCase()==='h') { minimapVisible = !minimapVisible; if (minimapWrap) minimapWrap.style.display = minimapVisible?'flex':'none'; }
+  // H key previously toggled minimap; minimap removed
   if (k.toLowerCase()==='g') { cam.walk = !cam.walk; saveSettings(); }
   if (k === '+') { fogDistance = Math.min(2000, fogDistance + 50); saveSettings(); }
   if (k === '-') { fogDistance = Math.max(100, fogDistance - 50); saveSettings(); }
@@ -137,7 +132,6 @@ window.addEventListener('keydown', (e)=>{
   if (k === '6') { selectedBlock = WOOD; updateHotbar(selectedBlock); }
   if (k === '7') { selectedBlock = LEAVES; updateHotbar(selectedBlock); }
   if (k === '8') { selectedBlock = SNOW; updateHotbar(selectedBlock); }
-  if (k.toLowerCase() === 'p') { selectedBlock = PORTAL; updateHotbar(selectedBlock); }
 });
 
 // Persist simple settings (fog, selected block, walk/fly)
@@ -183,8 +177,8 @@ function saveSettings(){
 // World/chunks
 const CHUNK = 32; // larger chunk to reduce overhead
 // Increase vertical resolution for towering mountains
-const WORLD_HEIGHT = 256;
-const WATER_LEVEL = 40; // lower relative to world height for deeper oceans
+const WORLD_HEIGHT = 384; // taller world to allow towering mountains
+const WATER_LEVEL = 48; // adjust slightly relative to new height
 // Aggressively reduce render distance for performance
 const viewDistance = { chunks: 2 };
 let fogDistance = 200; // closer fog for short render distance
@@ -210,14 +204,13 @@ function noise2(x, z){
 }
 
 function heightAt(x, z){
-  // Harsher terrain: mix low-frequency base with ridged noise and details
-  const base = noise2(x*0.015, z*0.015);                           // broad hills 0..1
-  const ridge = 1 - Math.abs(2*noise2(x*0.03+100, z*0.03-100) - 1); // ridged 0..1
-  let h = 6 + Math.pow(0.5*base + 0.5*ridge, 1.6) * 50;             // push highs higher
-  // Add details: medium and high frequency perturbations
-  h += (noise2(x*0.12, z*0.12) - 0.5) * 8;                          // +/-4 detail
-  h += (1 - Math.abs(2*noise2(x*0.22+200, z*0.22+200) - 1)) * 3 - 1.5; // small ridges
-  // Clamp to world bounds
+  // Much taller mountains: lower frequency base with strong amplification
+  const base = noise2(x*0.01, z*0.01);
+  const ridge = 1 - Math.abs(2*noise2(x*0.02+100, z*0.02-100) - 1);
+  let h = 8 + Math.pow(0.5*base + 0.5*ridge, 1.8) * 120; // scale up massively
+  // Add some detail, but less noisy relative to big features
+  h += (noise2(x*0.06, z*0.06) - 0.5) * 10; // +/-5 detail
+  h += (1 - Math.abs(2*noise2(x*0.15+200, z*0.15+200) - 1)) * 6 - 3; // small ridges
   return Math.max(0, Math.min(WORLD_HEIGHT-2, Math.floor(h)));
 }
 
@@ -294,7 +287,7 @@ function biomeAt(x, z){
 }
 
 // Block IDs and base colors
-const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WATER=5, WOOD=6, LEAVES=7, SNOW=8, PORTAL=9;
+const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WATER=5, WOOD=6, LEAVES=7, SNOW=8;
 const BASE_COLOR = {
   [GRASS]: [95, 159, 53],
   [DIRT]: [134, 96, 67],
@@ -304,7 +297,6 @@ const BASE_COLOR = {
   [WOOD]: [102, 81, 52],
   [LEAVES]: [76, 128, 76],
   [SNOW]: [240, 248, 255],
-  [PORTAL]: [180, 60, 200],
 };
 
 // Multiplayer removed; single-player only
@@ -678,15 +670,7 @@ function genChunk(cx, cz){
         }
         voxels[(y*CHUNK + z)*CHUNK + x] = id;
       }
-      // Vegetation placement by biome
-      if (biome===BIOME.FOREST || biome===BIOME.TAIGA || biome===BIOME.PLAINS){
-        if (hh>=18 && hh<=120) {
-          const r = hash3i(wx*3, 0, wz*7);
-          // Forest denser, taiga medium, plains sparse
-          const threshold = biome===BIOME.FOREST ? 0.992 : biome===BIOME.TAIGA ? 0.996 : 0.998;
-          if (r > threshold) placeTreeInChunk(voxels, x, hh+1, z);
-        }
-      }
+      // Vegetation removed: no trees generated
     }
   }
   // Apply persistent edits that fall into this chunk
@@ -704,45 +688,7 @@ function genChunk(cx, cz){
   return voxels;
 }
 
-function placeTreeInChunk(voxels, lx, baseY, lz){
-  // New tree: taller trunk + layered canopy (no cone)
-  const rnd = hash3i(lx, baseY, lz);
-  const h = 18 + Math.floor(rnd*10); // 18..27 trunk
-  const top = Math.min(WORLD_HEIGHT-2, baseY + h);
-  // Place trunk
-  for (let y=baseY; y<=top; y++){
-    const idx = (y*CHUNK + lz)*CHUNK + lx;
-    if (y>=0 && y<WORLD_HEIGHT) voxels[idx] = WOOD;
-  }
-  // Layered canopy: 4-6 rings decreasing radius upwards
-  const layers = 4 + Math.floor(rnd*2);
-  for (let i=0;i<layers;i++){
-    const y = top - i;
-    const r = Math.max(2, 5 - i) + ((i%2===0)?1:0); // 6,5,4,3..
-    for (let dz=-r; dz<=r; dz++){
-      for (let dx=-r; dx<=r; dx++){
-        if (dx*dx + dz*dz > r*r) continue;
-        const x = lx+dx, z=lz+dz; if (x<0||x>=CHUNK||z<0||z>=CHUNK||y<0||y>=WORLD_HEIGHT) continue;
-        const idx = (y*CHUNK + z)*CHUNK + x;
-        const cur = voxels[idx];
-        if (cur===AIR || cur===SNOW || cur===LEAVES) voxels[idx]=LEAVES;
-      }
-    }
-  }
-  // Random leaves around trunk for natural look
-  for (let k=0;k<8;k++){
-    const dy = top - 1 - Math.floor((hash3i(lx+k, baseY, lz)*4));
-    const rx = 1 + (Math.floor(hash3i(lx, baseY+k, lz)*2));
-    const rz = 1 + (Math.floor(hash3i(lx, baseY, lz+k)*2));
-    for (let dz=-rz; dz<=rz; dz++){
-      for (let dx=-rx; dx<=rx; dx++){
-        const x = lx+dx, z=lz+dz, y=dy; if (x<0||x>=CHUNK||z<0||z>=CHUNK||y<0||y>=WORLD_HEIGHT) continue;
-        const idx = (y*CHUNK + z)*CHUNK + x;
-        if (voxels[idx]===AIR) voxels[idx]=LEAVES;
-      }
-    }
-  }
-}
+// Tree generation removed
 
 // Mesh building with face culling and color jitter
 const faces = [
@@ -769,7 +715,7 @@ function jitterColor(base, wx, wy, wz){
 function buildMesh(cx, cz, voxels){
   const solid=[]; // position (3) + color (3) + normal (3)
   const water=[]; // same layout; rendered in transparent pass
-  const portals=[]; // portal quads for translucent pass
+  const portals=[]; // removed (no portals)
   for (let x=0;x<CHUNK;x++){
     for (let y=0;y<WORLD_HEIGHT;y++){
       for (let z=0;z<CHUNK;z++){
@@ -780,20 +726,20 @@ function buildMesh(cx, cz, voxels){
         base = applyBiomeTint(base, id, wx, wy, wz);
         const col = jitterColor(base, wx, wy, wz);
         // Occlusion culling: skip blocks fully surrounded by solids (except water/portal surfaces)
-        if (id!==WATER && id!==PORTAL){
+        if (id!==WATER){
           const nn = [
             getVoxel(voxels,x+1,y,z), getVoxel(voxels,x-1,y,z),
             getVoxel(voxels,x,y+1,z), getVoxel(voxels,x,y-1,z),
             getVoxel(voxels,x,y,z+1), getVoxel(voxels,x,y,z-1)
           ];
-          if (nn.every(n=> n!==AIR && n!==WATER && n!==PORTAL)) continue;
+          if (nn.every(n=> n!==AIR && n!==WATER)) continue;
         }
         // Skip rendering blocks immediately under water surface to reduce overdraw
         if (id!==WATER && wy < WATER_LEVEL && getVoxel(voxels, x,wy+1,z)===WATER) continue;
         for (const f of faces){
           const nx=x+f.dir[0], ny=y+f.dir[1], nz=z+f.dir[2];
           const neighbor = getVoxel(voxels, nx,ny,nz);
-          if (neighbor!==AIR && !(id===WATER && neighbor===WATER) && !(id===PORTAL && neighbor===PORTAL)) continue;
+          if (neighbor!==AIR && !(id===WATER && neighbor===WATER)) continue;
           // Create two tris
           const v=f.verts;
           const p0=[wx+v[0][0], wy+v[0][1], wz+v[0][2]];
@@ -803,7 +749,7 @@ function buildMesh(cx, cz, voxels){
           const n=f.norm;
           const c=[col[0], col[1], col[2]];
           let out = solid;
-          if (id===WATER) out = water; else if (id===PORTAL) out = portals;
+          if (id===WATER) out = water;
           out.push(...p0, ...c, ...n,  ...p1, ...c, ...n,  ...p2, ...c, ...n);
           out.push(...p0, ...c, ...n,  ...p2, ...c, ...n,  ...p3, ...c, ...n);
         }
@@ -818,11 +764,7 @@ function buildMesh(cx, cz, voxels){
   const waterVBO = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, waterVBO);
   gl.bufferData(gl.ARRAY_BUFFER, waterBuf, gl.STATIC_DRAW);
-  const portalBuf = new Float32Array(portals);
-  const portalVBO = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, portalVBO);
-  gl.bufferData(gl.ARRAY_BUFFER, portalBuf, gl.STATIC_DRAW);
-  return { solidVBO, solidCount: solidBuf.length/9, waterVBO, waterCount: waterBuf.length/9, portalVBO, portalCount: portalBuf.length/9 };
+  return { solidVBO, solidCount: solidBuf.length/9, waterVBO, waterCount: waterBuf.length/9 };
 }
 
 function updateChunk(cx, cz){
@@ -832,11 +774,11 @@ function updateChunk(cx, cz){
   if (!ent.voxels){ ent.voxels = genChunk(cx, cz); }
   if (ent.solidVBO) gl.deleteBuffer(ent.solidVBO);
   if (ent.waterVBO) gl.deleteBuffer(ent.waterVBO);
-  if (ent.portalVBO) gl.deleteBuffer(ent.portalVBO);
+  // no portals
   const mesh = buildMesh(cx, cz, ent.voxels);
   ent.solidVBO = mesh.solidVBO; ent.solidCount = mesh.solidCount;
   ent.waterVBO = mesh.waterVBO; ent.waterCount = mesh.waterCount;
-  ent.portalVBO = mesh.portalVBO; ent.portalCount = mesh.portalCount;
+  // no portals
   ent.cx=cx; ent.cz=cz;
 }
 
@@ -1180,8 +1122,7 @@ function updateVisibleChunks(){
       scheduleChunk(cx+dx, cz+dz);
     }
   }
-  // Also refresh minimap for the new center
-  updateMinimap();
+  // Minimap removed
 }
 
 // Reset world cache when seed changes
@@ -1199,8 +1140,7 @@ const exportBtn = document.getElementById('exportEdits');
 const importBtn = document.getElementById('importEdits');
 const clearBtn = document.getElementById('clearEdits');
 const shotBtn = document.getElementById('screenshot');
-const undoBtn = document.getElementById('undoBtn');
-const redoBtn = document.getElementById('redoBtn');
+// Undo/Redo buttons removed in minimal build
 const lodBtn = document.getElementById('lodBtn');
 
 if (exportBtn) exportBtn.onclick = ()=>{
@@ -1264,8 +1204,8 @@ window.addEventListener('keydown', (e)=>{
 
 // Hotbar UI (single implementation)
 const hotbar = document.getElementById('hotbar');
-const hotbarIds = [GRASS, DIRT, STONE, SAND, WATER, WOOD, LEAVES, SNOW, PORTAL];
-const hotbarNames = ['Grass','Dirt','Stone','Sand','Water','Wood','Leaves','Snow','Portal'];
+const hotbarIds = [GRASS, DIRT, STONE, SAND, WATER, WOOD, LEAVES, SNOW];
+const hotbarNames = ['Grass','Dirt','Stone','Sand','Water','Wood','Leaves','Snow'];
 function renderHotbar(){
   if (!hotbar) return;
   hotbar.innerHTML = '';
@@ -1446,8 +1386,7 @@ function draw(){
     gl.drawArrays(gl.TRIANGLES, 0, buf.length/9);
     gl.deleteBuffer(vbo);
   }
-  // Minimap after world draw
-  updateMinimap();
+  // Minimap removed
 }
 
 // Raycasting via grid DDA to find targeted block and face
@@ -1487,29 +1426,7 @@ function raycast(maxDist=8){
   return { hit:false };
 }
 
-// Simple paired portal system: place two portals and teleport between them on contact
-let portalA = null, portalB = null;
-function placePortal(wx, wy, wz){
-  setVoxel(wx, wy, wz, PORTAL);
-  if (!portalA) portalA = {x:wx,y:wy,z:wz};
-  else if (!portalB && (wx!==portalA.x || wy!==portalA.y || wz!==portalA.z)) portalB = {x:wx,y:wy,z:wz};
-  else { portalA = portalB; portalB = {x:wx,y:wy,z:wz}; }
-}
-
-function tryTeleport(){
-  if (!portalA || !portalB) return;
-  const footX = cam.pos[0];
-  const footY = cam.pos[1] - 1.6; // feet
-  const footZ = cam.pos[2];
-  function near(p){ return Math.abs(footX-(p.x+0.5))<0.5 && Math.abs(footY-(p.y+0.5))<1.0 && Math.abs(footZ-(p.z+0.5))<0.5; }
-  let target=null;
-  if (near(portalA)) target = portalB; else if (near(portalB)) target = portalA;
-  if (target){
-    cam.pos[0] = target.x + 0.5;
-    cam.pos[1] = target.y + 1.6 + 0.01; // avoid re-trigger
-    cam.pos[2] = target.z + 0.5;
-  }
-}
+// Portals removed
 
 function placeOrRemove(type){
   const res = raycast(8);
@@ -1517,18 +1434,13 @@ function placeOrRemove(type){
   if (type==='remove'){
     const prev = getVoxelWorld(res.x, res.y, res.z);
     setVoxel(res.x, res.y, res.z, AIR);
-    // If removing a portal, forget it if stored
-    if (prev===PORTAL){
-      if (portalA && portalA.x===res.x && portalA.y===res.y && portalA.z===res.z) portalA=null;
-      if (portalB && portalB.x===res.x && portalB.y===res.y && portalB.z===res.z) portalB=null;
-    }
+    // Portals removed
   } else if (type==='place'){
     const wx = res.x + res.face[0];
     const wy = res.y + res.face[1];
     const wz = res.z + res.face[2];
     if (wy>=0 && wy<WORLD_HEIGHT){
-      if (selectedBlock===PORTAL){ placePortal(wx, wy, wz); }
-      else { setVoxel(wx, wy, wz, selectedBlock); }
+      setVoxel(wx, wy, wz, selectedBlock);
     }
   }
 }
@@ -1572,9 +1484,8 @@ function loop(t){
   if (!timePaused) timeSec += dt * timeSpeed;
   move(dt);
   // overlays removed
-  tryTeleport();
-  updateMinimap();
-  updateMinimap();
+  // Portals removed
+  // Minimap removed
   updateViewProj();
   updateVisibleChunks();
   processBuildQueue(4);
@@ -1609,7 +1520,7 @@ function loop(t){
 
   draw();
   const dbg = document.getElementById('debug');
-  const blockNames = ['AIR','GRASS','DIRT','STONE','SAND','WATER','WOOD','LEAVES','SNOW','PORTAL'];
+  const blockNames = ['AIR','GRASS','DIRT','STONE','SAND','WATER','WOOD','LEAVES','SNOW'];
   // FPS calc
   fpsCounter.frame(t);
   const tod = ((theta%(2*Math.PI))+2*Math.PI)%(2*Math.PI);
@@ -1674,37 +1585,6 @@ function buildWireCube(x,y,z){
 }
 
 // Simple FPS counter with exponential smoothing
-// Minimap rendering (top-down height/biome map around player)
-function updateMinimap(){
-  if (!minimapCtx || !minimapVisible) return;
-  const W = minimapCanvas.width, H = minimapCanvas.height;
-  const centerX = Math.floor(cam.pos[0]);
-  const centerZ = Math.floor(cam.pos[2]);
-  const half = 40; // covers ~80x80 area
-  const scale = Math.min(W, H) / (half*2);
-  const img = minimapCtx.createImageData(W, H);
-  let p=0;
-  for (let y=0; y<H; y++){
-    for (let x=0; x<W; x++){
-      const wx = centerX + Math.floor((x - W/2)/scale);
-      const wz = centerZ + Math.floor((y - H/2)/scale);
-      const hh = heightAt(wx, wz);
-      let r=90,g=140,b=200; // sky default
-      if (hh<12) { r=60; g=110; b=200; }
-      else if (hh<18) { r=219; g=211; b=160; }
-      else if (hh>36) { r=235; g=240; b=245; }
-      else { r=95; g=159; b=53; }
-      img.data[p++] = r; img.data[p++] = g; img.data[p++] = b; img.data[p++] = 255;
-    }
-  }
-  minimapCtx.putImageData(img, 0, 0);
-  // Draw player marker
-  minimapCtx.fillStyle = '#fff';
-  minimapCtx.beginPath();
-  minimapCtx.arc(W/2, H/2, 2.5, 0, Math.PI*2);
-  minimapCtx.fill();
-}
-
 const fpsCounter = (()=>{
   let fps=60, lastT=0;
   return {

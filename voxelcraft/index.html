@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2387b1ff'/%3E%3Cpath d='M3 11h10V5L8 2 3 5z' fill='%23ffffff'/%3E%3C/svg%3E">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Voxelcraft - Minimal Long Horizon Voxel World</title>
+    <title>Voxelcraft - Minimal Voxel World</title>
     <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #87b1ff; }
@@ -12,12 +12,6 @@
       #instructions { opacity: 0.9; }
       #debug { margin-top: 8px; font-size: 12px; opacity: 0.85; }
       #lock { display: inline-block; padding: 6px 10px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; cursor: pointer; }
-      #inventory { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 420px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.25); border-radius: 8px; padding: 12px; display: none; color: #fff; }
-      #inventory h3 { margin: 0 0 8px 0; font-size: 16px; }
-      #invGrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
-      #invGrid .invSlot { height: 54px; background: rgba(0,0,0,0.35); border: 2px solid rgba(255,255,255,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; }
-      #invGrid .invSlot.active { border-color: #ffd24d; box-shadow: 0 0 0 2px rgba(255,210,77,0.5); }
-      #invGrid .count { position: absolute; right: 4px; bottom: 2px; font-size: 11px; opacity: 0.9; }
       .slot { position: relative; }
       .slot .count { position: absolute; right: 4px; bottom: 2px; font-size: 10px; opacity: 0.9; }
       #crosshair { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin-left: -8px; margin-top: -8px; pointer-events: none; opacity: 0.7; }
@@ -30,8 +24,7 @@
       .slot.active { border-color: #ffd24d; box-shadow: 0 0 0 2px rgba(255,210,77,0.5); }
       #toolbar { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap; max-width: 50vw; }
       #toolbar button { padding: 6px 8px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; color: #fff; cursor: pointer; }
-      #minimapWrap { position: absolute; right: 12px; top: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 6px; color: #fff; }
-      #minimap { width: 160px; height: 160px; image-rendering: pixelated; }
+      /* Minimap styles removed */
     </style>
   </head>
   <body>
@@ -40,16 +33,13 @@
 
     <!-- Overlay: instructions, debug, and pointer lock button -->
     <div id="overlay">
-      <div id="instructions">WASD to move, Mouse to look, G toggle walk/fly, H toggle minimap, F2 screenshot, F9 new world</div>
+      <div id="instructions">WASD to move, Mouse to look, G toggle walk/fly, F2 screenshot, F9 new world</div>
       <div id="debug"></div>
       <div id="lock">Click to Lock Pointer</div>
     </div>
 
     <!-- Minimap -->
-    <div id="minimapWrap">
-      <canvas id="minimap"></canvas>
-      <div style="font-size:12px; opacity:0.9;">Minimap (H to toggle)</div>
-    </div>
+      <!-- Minimap removed for minimal build -->
 
     <!-- Toolbar: edits, LOD, and seed controls -->
     <div id="toolbar">
@@ -57,8 +47,7 @@
       <button id="importEdits" title="Import placed blocks">Import</button>
       <button id="clearEdits" title="Clear all local edits">Clear Edits</button>
       <button id="screenshot" title="Save screenshot">Screenshot</button>
-      <button id="undoBtn" title="Undo (Ctrl/Cmd+Z)">Undo</button>
-      <button id="redoBtn" title="Redo (Ctrl+Y / Shift+Cmd+Z)">Redo</button>
+      <!-- Undo/Redo removed for minimal build -->
       <button id="lodBtn" title="Toggle far terrain LOD">Far LOD</button>
       <div style="display:flex; gap:6px; align-items:center;">
         <input id="seedInput" type="text" placeholder="Seed" style="width:140px; padding:4px 6px; border-radius:4px; border:1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.25); color:#fff;">
