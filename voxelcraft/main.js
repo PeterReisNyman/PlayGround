@@ -98,6 +98,14 @@ function mat4_lookAt(eye, center, up){
 
 // Camera and controls
 const cam = { pos:[0, 22, 0], rot:[-0.2, 0.6], vel:[0,0,0], walk:false, onGround:false };
+
+// World scale (1 block unit = 0.25 meters). Player should be ~8 blocks tall (≈2.0 m)
+const BLOCK_SIZE_M = 0.25;
+const PLAYER_HEIGHT_BLOCKS = 8.0;          // total height in blocks (~2.0 m)
+const PLAYER_EYE_HEIGHT_BLOCKS = PLAYER_HEIGHT_BLOCKS - 0.1; // keep ~0.1 block head room
+const PLAYER_RADIUS_BLOCKS = 0.3;          // keep width similar for navigation
+const MAX_STEP_UP = 3.0;                    // auto step up to 3 blocks (75cm)
+const MAX_STEP_DOWN = 3.0;                  // allow stepping down up to 3 blocks
 let key = {}; window.addEventListener('keydown', e=> key[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e=> key[e.key.toLowerCase()] = false);
 const lockBtn = document.getElementById('lock');
@@ -130,12 +138,6 @@ window.addEventListener('keydown', (e)=>{
   if (k === '7') { selectedBlock = LEAVES; updateHotbar(selectedBlock); }
   if (k === '8') { selectedBlock = SNOW; updateHotbar(selectedBlock); }
   if (k.toLowerCase() === 'p') { selectedBlock = PORTAL; updateHotbar(selectedBlock); }
-  // Bio-sim controls
-  if (k.toLowerCase()==='b') { bio.toggle(); }
-  if (k.toLowerCase()==='m') { bio.running = !bio.running; nca.running = !nca.running; }
-  if (k.toLowerCase()==='n') { bio.stepOnce(); nca.stepOnce(); }
-  if (k.toLowerCase()==='r') { bio.seedRandom(); nca.seedSeed(); }
-  if (k.toLowerCase()==='v') { nca.toggle(); }
 });
 
 // Persist simple settings (fog, selected block, walk/fly)
@@ -180,10 +182,12 @@ function saveSettings(){
 
 // World/chunks
 const CHUNK = 32; // larger chunk to reduce overhead
-const WORLD_HEIGHT = 64;
-const WATER_LEVEL = 20; // global water plane height
-const viewDistance = { chunks: 8 }; // long horizon; tune if needed
-let fogDistance = 600; // can be tweaked with +/-
+// Increase vertical resolution for towering mountains
+const WORLD_HEIGHT = 256;
+const WATER_LEVEL = 40; // lower relative to world height for deeper oceans
+// Aggressively reduce render distance for performance
+const viewDistance = { chunks: 2 };
+let fogDistance = 200; // closer fog for short render distance
 let selectedBlock = 3; // default STONE
 let currentSky = [0.53, 0.69, 1.0];
 
@@ -206,8 +210,15 @@ function noise2(x, z){
 }
 
 function heightAt(x, z){
-  const h = noise2(x*0.05, z*0.05)*24 + noise2(x*0.15, z*0.15)*6 + 16;
-  return Math.floor(h);
+  // Harsher terrain: mix low-frequency base with ridged noise and details
+  const base = noise2(x*0.015, z*0.015);                           // broad hills 0..1
+  const ridge = 1 - Math.abs(2*noise2(x*0.03+100, z*0.03-100) - 1); // ridged 0..1
+  let h = 6 + Math.pow(0.5*base + 0.5*ridge, 1.6) * 50;             // push highs higher
+  // Add details: medium and high frequency perturbations
+  h += (noise2(x*0.12, z*0.12) - 0.5) * 8;                          // +/-4 detail
+  h += (1 - Math.abs(2*noise2(x*0.22+200, z*0.22+200) - 1)) * 3 - 1.5; // small ridges
+  // Clamp to world bounds
+  return Math.max(0, Math.min(WORLD_HEIGHT-2, Math.floor(h)));
 }
 
 // --- Simple biome sampling using temperature and moisture ---
@@ -229,7 +240,8 @@ function moistureAt(x, z){
   const mid  = noise2(x*0.05 + 333.77, z*0.05 - 987.11);
   const h = heightAt(x, z);
   let m = 0.6*base + 0.4*mid;
-  if (h < 16) m = clamp(m + 0.15, 0, 1); // near sea level, wetter
+  // With lowered sea level, bias much wetter near coasts
+  if (h < WATER_LEVEL + 2) m = clamp(m + 0.25, 0, 1);
   return clamp(m, 0, 1);
 }
 // Apply biome tint to base RGB (0-255 array) based on temp/moist
@@ -268,6 +280,19 @@ function applyBiomeTint(baseRGB, id, wx, wy, wz){
   return out;
 }
 
+// Basic biome classification to drive vegetation and future features
+const BIOME = { DESERT:'desert', PLAINS:'plains', FOREST:'forest', TAIGA:'taiga', TUNDRA:'tundra' };
+function biomeAt(x, z){
+  const t = temperatureAt(x, z); // 0..1 (hot)
+  const m = moistureAt(x, z);    // 0..1 (wet)
+  // Simple thresholds
+  if (t > 0.7 && m < 0.35) return BIOME.DESERT;
+  if (t < 0.25 && m < 0.35) return BIOME.TUNDRA;
+  if (t < 0.35 && m >= 0.35) return BIOME.TAIGA;
+  if (m > 0.6) return BIOME.FOREST;
+  return BIOME.PLAINS;
+}
+
 // Block IDs and base colors
 const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WATER=5, WOOD=6, LEAVES=7, SNOW=8, PORTAL=9;
 const BASE_COLOR = {
@@ -282,13 +307,13 @@ const BASE_COLOR = {
   [PORTAL]: [180, 60, 200],
 };
 
-// Multiplayer state (single definition, declared early to avoid TDZ issues)
-const MP = { url:null, clientId:Math.random().toString(36).slice(2,10), color:[0.2+Math.random()*0.8,0.2+Math.random()*0.8,0.2+Math.random()*0.8], peers:new Map(), connected:false, lastSend:0 };
+// Multiplayer removed; single-player only
 
 // ---------------------------------------------------------
 // Bio-simulation overlay: 3D cyclic cellular automaton (CCA)
 // Produces complex wave/filament patterns in 3D, rendered as translucent voxels
 // Controls: B toggle, M run/pause, N step once, R reseed
+// Experimental visual overlays removed for minimal build
 class BioSim3D {
   constructor(glCtx){
     this.gl = glCtx;
@@ -433,7 +458,8 @@ class BioSim3D {
     gl.drawArrays(gl.TRIANGLES, 0, this.count);
   }
 }
-const bio = new BioSim3D(gl);
+// Disable experimental bio overlay: replace with a lightweight no-op stub
+const bio = { enabled:false, running:false, update:()=>{}, draw:()=>{}, stepOnce:()=>{}, seedRandom:()=>{}, states:0, threshold:0 };
 
 // ---------------------------------------------------------
 // Neural Cellular Automata (NCA) 3D overlay
@@ -602,7 +628,8 @@ function hsvToRgb(h, s, v){
     case 3: return [p,q,v]; case 4: return [t,p,v]; case 5: return [v,p,q];
   }
 }
-const nca = new Nca3D(gl);
+// Disable experimental NCA overlay: lightweight no-op stub
+const nca = { enabled:false, running:false, update:()=>{}, draw:()=>{}, stepOnce:()=>{}, seedSeed:()=>{}, C:0 };
 
 // Chunk storage and meshing
 const chunks = new Map(); // key "cx,cz" -> {voxels, solidVBO, solidCount, waterVBO, waterCount, cx, cz}
@@ -634,24 +661,30 @@ function genChunk(cx, cz){
       const wx = cx*CHUNK + x;
       const wz = cz*CHUNK + z;
       const hh = heightAt(wx, wz);
+      const biome = biomeAt(wx, wz);
       for (let y=0; y<WORLD_HEIGHT; y++){
         let id=AIR;
         if (y<=hh){
-          if (hh < WATER_LEVEL + 2) id = SAND;
-          else if (y===hh) id = (hh>36 ? SNOW : GRASS);
-          else if (y>hh-3) id = DIRT;
+          if (hh < WATER_LEVEL + 3) id = (y>hh-2 ? SAND : STONE); // prevent deep sand columns
+          else if (y===hh) {
+            if (biome===BIOME.DESERT) id = SAND;
+            else if (hh>42) id = SNOW;
+            else id = GRASS;
+          }
+          else if (y>hh-3) id = (biome===BIOME.DESERT ? SAND : DIRT);
           else id = STONE;
         } else if (y < WATER_LEVEL && y > hh) {
           id = WATER;
         }
         voxels[(y*CHUNK + z)*CHUNK + x] = id;
       }
-      // Simple trees on grass between certain heights
-      // Chance determined by hash; avoid near waterline
-      if (hh>=18 && hh<=36) {
-        const r = hash3i(wx*3, 0, wz*7);
-        if (r > 0.995) {
-          placeTreeInChunk(voxels, x, hh+1, z); // base sits above ground
+      // Vegetation placement by biome
+      if (biome===BIOME.FOREST || biome===BIOME.TAIGA || biome===BIOME.PLAINS){
+        if (hh>=18 && hh<=120) {
+          const r = hash3i(wx*3, 0, wz*7);
+          // Forest denser, taiga medium, plains sparse
+          const threshold = biome===BIOME.FOREST ? 0.992 : biome===BIOME.TAIGA ? 0.996 : 0.998;
+          if (r > threshold) placeTreeInChunk(voxels, x, hh+1, z);
         }
       }
     }
@@ -672,30 +705,40 @@ function genChunk(cx, cz){
 }
 
 function placeTreeInChunk(voxels, lx, baseY, lz){
-  // Trunk height 4-6
-  const h = 4 + (Math.floor(hash3i(lx, baseY, lz)*3));
-  const top = Math.min(WORLD_HEIGHT-1, baseY + h);
+  // New tree: taller trunk + layered canopy (no cone)
+  const rnd = hash3i(lx, baseY, lz);
+  const h = 18 + Math.floor(rnd*10); // 18..27 trunk
+  const top = Math.min(WORLD_HEIGHT-2, baseY + h);
   // Place trunk
   for (let y=baseY; y<=top; y++){
-    if (y<0||y>=WORLD_HEIGHT) break;
     const idx = (y*CHUNK + lz)*CHUNK + lx;
-    voxels[idx] = WOOD;
+    if (y>=0 && y<WORLD_HEIGHT) voxels[idx] = WOOD;
   }
-  // Simple leaf blob around top
-  const radius = 2;
-  for (let dy=-radius; dy<=radius; dy++){
-    const y = top + dy;
-    if (y<0||y>=WORLD_HEIGHT) continue;
-    for (let dz=-radius; dz<=radius; dz++){
-      const z = lz + dz; if (z<0||z>=CHUNK) continue;
-      for (let dx=-radius; dx<=radius; dx++){
-        const x = lx + dx; if (x<0||x>=CHUNK) continue;
-        const d = Math.abs(dx)+Math.abs(dy)+Math.abs(dz);
-        if (d<=radius+1){
-          const idx = (y*CHUNK + z)*CHUNK + x;
-          // Do not overwrite solid trunk at center top; allow replacing air or foliage/snow
-          if (voxels[idx]===AIR || voxels[idx]===LEAVES || voxels[idx]===SNOW) voxels[idx]=LEAVES;
-        }
+  // Layered canopy: 4-6 rings decreasing radius upwards
+  const layers = 4 + Math.floor(rnd*2);
+  for (let i=0;i<layers;i++){
+    const y = top - i;
+    const r = Math.max(2, 5 - i) + ((i%2===0)?1:0); // 6,5,4,3..
+    for (let dz=-r; dz<=r; dz++){
+      for (let dx=-r; dx<=r; dx++){
+        if (dx*dx + dz*dz > r*r) continue;
+        const x = lx+dx, z=lz+dz; if (x<0||x>=CHUNK||z<0||z>=CHUNK||y<0||y>=WORLD_HEIGHT) continue;
+        const idx = (y*CHUNK + z)*CHUNK + x;
+        const cur = voxels[idx];
+        if (cur===AIR || cur===SNOW || cur===LEAVES) voxels[idx]=LEAVES;
+      }
+    }
+  }
+  // Random leaves around trunk for natural look
+  for (let k=0;k<8;k++){
+    const dy = top - 1 - Math.floor((hash3i(lx+k, baseY, lz)*4));
+    const rx = 1 + (Math.floor(hash3i(lx, baseY+k, lz)*2));
+    const rz = 1 + (Math.floor(hash3i(lx, baseY, lz+k)*2));
+    for (let dz=-rz; dz<=rz; dz++){
+      for (let dx=-rx; dx<=rx; dx++){
+        const x = lx+dx, z=lz+dz, y=dy; if (x<0||x>=CHUNK||z<0||z>=CHUNK||y<0||y>=WORLD_HEIGHT) continue;
+        const idx = (y*CHUNK + z)*CHUNK + x;
+        if (voxels[idx]===AIR) voxels[idx]=LEAVES;
       }
     }
   }
@@ -736,7 +779,16 @@ function buildMesh(cx, cz, voxels){
         const wx = cx*CHUNK + x, wy=y, wz = cz*CHUNK + z;
         base = applyBiomeTint(base, id, wx, wy, wz);
         const col = jitterColor(base, wx, wy, wz);
-        // Skip rendering blocks far below water if water on top to reduce overdraw
+        // Occlusion culling: skip blocks fully surrounded by solids (except water/portal surfaces)
+        if (id!==WATER && id!==PORTAL){
+          const nn = [
+            getVoxel(voxels,x+1,y,z), getVoxel(voxels,x-1,y,z),
+            getVoxel(voxels,x,y+1,z), getVoxel(voxels,x,y-1,z),
+            getVoxel(voxels,x,y,z+1), getVoxel(voxels,x,y,z-1)
+          ];
+          if (nn.every(n=> n!==AIR && n!==WATER && n!==PORTAL)) continue;
+        }
+        // Skip rendering blocks immediately under water surface to reduce overdraw
         if (id!==WATER && wy < WATER_LEVEL && getVoxel(voxels, x,wy+1,z)===WATER) continue;
         for (const f of faces){
           const nx=x+f.dir[0], ny=y+f.dir[1], nz=z+f.dir[2];
@@ -963,7 +1015,7 @@ window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='k') farLOD.
 function updateViewProj(){
   const aspect = canvas.width / canvas.height;
   // Extend far plane to accommodate distant horizon geometry
-  const farPlane = Math.max(2000, fogDistance*6, farLOD.enabled ? farLOD.radius*2 : 0);
+  const farPlane = Math.max(800, fogDistance*2.5, farLOD.enabled ? farLOD.radius*2 : 0);
   const proj = mat4_perspective((fovDeg*Math.PI/180), aspect, 0.1, farPlane);
   const cp=Math.cos(cam.rot[0]), sp=Math.sin(cam.rot[0]);
   const cy=Math.cos(cam.rot[1]), sy=Math.sin(cam.rot[1]);
@@ -1007,36 +1059,38 @@ function move(dt){
   cam.vel[1] += accel[1]*dt;
   // Attempt vertical move with ground and ceiling collision
   let nextY = cam.pos[1] + cam.vel[1]*dt;
-  const height = 1.7; // approx player height
-  const eyeToFeet = 1.6;
+  const height = PLAYER_HEIGHT_BLOCKS; // player height in blocks
+  const eyeToFeet = PLAYER_EYE_HEIGHT_BLOCKS; // eye height above feet in blocks
   let feetY = nextY - eyeToFeet;
   const wx0 = Math.floor(cam.pos[0]);
   const wz0 = Math.floor(cam.pos[2]);
-  const under = getVoxelWorld(wx0, Math.floor(feetY), wz0);
-  if (under!==AIR && under!==WATER && feetY<Math.floor(feetY)+1){
+  const under = getVoxelWorld(wx0, Math.floor(feetY + 1e-4), wz0);
+  if (under!==AIR && under!==WATER && feetY<Math.floor(feetY)+1 - 1e-4){
     cam.onGround = true;
     cam.vel[1] = 0;
     // snap feet to top of block
-    cam.pos[1] = Math.floor(feetY)+1 + eyeToFeet;
+    cam.pos[1] = Math.floor(feetY)+1 + eyeToFeet + 1e-4;
   } else {
     cam.onGround = false;
     // Ceiling collision: if head intersects a solid block, push down
     const headY = nextY - eyeToFeet + height;
-    const aboveY = Math.floor(headY + 1e-3);
+    const aboveY = Math.floor(headY + 1e-4);
     const above = getVoxelWorld(wx0, aboveY, wz0);
-    if (above!==AIR && above!==WATER && headY > aboveY){
+    if (above!==AIR && above!==WATER && headY > aboveY + 1e-4){
       cam.vel[1] = Math.min(0, cam.vel[1]);
-      cam.pos[1] = aboveY + eyeToFeet - height - 1e-3;
+      cam.pos[1] = aboveY + eyeToFeet - height - 1e-4;
     } else {
       cam.pos[1] = nextY;
     }
   }
   // Horizontal collision (prevent walking through walls)
-  const r = 0.3; // player radius
+  const r = PLAYER_RADIUS_BLOCKS; // player radius in blocks
   function aabbBlocked(x, yFeet, z){
     const minX = Math.floor(x - r), maxX = Math.floor(x + r);
     const minZ = Math.floor(z - r), maxZ = Math.floor(z + r);
-    const minY = Math.floor(yFeet), maxY = Math.floor(yFeet + height);
+    // Use small epsilons to avoid falsely counting blocks just above the head or exactly at feet plane
+    const minY = Math.floor(yFeet + 1e-4);
+    const maxY = Math.floor(yFeet + height - 1e-3);
     for (let by=minY; by<=maxY; by++){
       for (let bz=minZ; bz<=maxZ; bz++){
         for (let bx=minX; bx<=maxX; bx++){
@@ -1065,23 +1119,39 @@ function move(dt){
   if (!aabbBlocked(tryX, feetY, cam.pos[2])){
     cam.pos[0] = tryX;
   } else {
-    // Step-down assist: allow moving if we can step down a small height at destination
-    const stepDown = 0.6;
-    if (!aabbBlocked(tryX, feetY - stepDown, cam.pos[2])){
-      cam.pos[0] = tryX; cam.pos[1] -= stepDown;
-    } else {
-      cam.vel[0] = 0;
+    // Step-up assist: climb lips up to 3 blocks (75cm)
+    let stepped = false;
+    for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+      if (!aabbBlocked(tryX, feetY + s, cam.pos[2])){
+        cam.pos[0] = tryX; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+      }
+    }
+    if (!stepped){
+      // Step-down assist: allow moving if we can step down up to 3 blocks at destination
+      if (!aabbBlocked(tryX, feetY - MAX_STEP_DOWN, cam.pos[2])){
+        cam.pos[0] = tryX; cam.pos[1] -= MAX_STEP_DOWN; feetY = cam.pos[1] - eyeToFeet;
+      } else {
+        cam.vel[0] = 0;
+      }
     }
   }
   let tryZ = cam.pos[2] + cam.vel[2]*dt;
   if (!aabbBlocked(cam.pos[0], feetY, tryZ)){
     cam.pos[2] = tryZ;
   } else {
-    const stepDown = 0.6;
-    if (!aabbBlocked(cam.pos[0], feetY - stepDown, tryZ)){
-      cam.pos[2] = tryZ; cam.pos[1] -= stepDown;
-    } else {
-      cam.vel[2] = 0;
+    // Step-up assist on Z axis
+    let stepped = false;
+    for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+      if (!aabbBlocked(cam.pos[0], feetY + s, tryZ)){
+        cam.pos[2] = tryZ; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+      }
+    }
+    if (!stepped){
+      if (!aabbBlocked(cam.pos[0], feetY - MAX_STEP_DOWN, tryZ)){
+        cam.pos[2] = tryZ; cam.pos[1] -= MAX_STEP_DOWN; feetY = cam.pos[1] - eyeToFeet;
+      } else {
+        cam.vel[2] = 0;
+      }
     }
   }
   // Prevent getting stuck inside walls when both axes blocked: nudge slightly outward
@@ -1129,11 +1199,9 @@ const exportBtn = document.getElementById('exportEdits');
 const importBtn = document.getElementById('importEdits');
 const clearBtn = document.getElementById('clearEdits');
 const shotBtn = document.getElementById('screenshot');
-const openInvBtn = document.getElementById('openInventory');
 const undoBtn = document.getElementById('undoBtn');
 const redoBtn = document.getElementById('redoBtn');
 const lodBtn = document.getElementById('lodBtn');
-const seedBtn = document.getElementById('seedBtn');
 
 if (exportBtn) exportBtn.onclick = ()=>{
   const obj = {}; for (const [k,v] of edits) obj[k]=v;
@@ -1170,57 +1238,11 @@ if (clearBtn) clearBtn.onclick = ()=>{
   chunks.clear(); scheduled.clear(); buildQueue.length=0;
   updateVisibleChunks();
 };
-if (shotBtn) shotBtn.onclick = ()=>{
-  const prev = canvas.toDataURL('image/png');
-  const a = document.createElement('a'); a.href = prev; a.download = 'voxelcraft.png'; a.click();
-};
+if (shotBtn) shotBtn.onclick = ()=> captureScreenshot(true);
 
-// Inventory / survival state
-const INV_KEY = 'voxelcraft_inventory_v1';
+// Inventory/survival removed for minimal experience; always creative
 let survival = false;
-const inventory = new Map(); // id -> count
-function invLoad(){
-  try{
-    const raw = localStorage.getItem(INV_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    survival = !!obj.survival;
-    if (obj.items){ for (const k in obj.items) inventory.set(+k, obj.items[k]|0); }
-  }catch{}
-}
-function invSave(){
-  if (invSave._t) cancelAnimationFrame(invSave._t);
-  invSave._t = requestAnimationFrame(()=>{
-    const items={}; for (const [k,v] of inventory) items[k]=v;
-    try{ localStorage.setItem(INV_KEY, JSON.stringify({ survival, items })); }catch{}
-  });
-}
-function invAdd(id, n=1){
-  if (!id) return;
-  inventory.set(id, (inventory.get(id)|0)+n);
-  invSave();
-  if (typeof updateInvUI === 'function') updateInvUI();
-  updateHotbarCounts();
-}
-function invHas(id, n=1){ return (inventory.get(id)|0) >= n; }
-function invConsume(id, n=1){
-  if (!invHas(id,n)) return false;
-  inventory.set(id, (inventory.get(id)|0)-n);
-  invSave();
-  if (typeof updateInvUI === 'function') updateInvUI();
-  updateHotbarCounts();
-  return true;
-}
-function updateHotbarCounts(){
-  const slots = hotbar ? hotbar.querySelectorAll('.slot') : [];
-  slots.forEach(el=>{
-    const id = parseInt(el.dataset.id,10);
-    let span = el.querySelector('.count');
-    if (!span){ span = document.createElement('div'); span.className='count'; el.appendChild(span); }
-    span.textContent = survival ? String(inventory.get(id)||0) : '';
-  });
-}
-invLoad();
+function updateHotbarCounts(){ /* no-op in creative */ }
 if (lodBtn) lodBtn.onclick = ()=>{ farLOD.enabled = !farLOD.enabled; };
 
 // Seed UI wiring
@@ -1231,18 +1253,7 @@ if (seedInput){ seedInput.value = worldSeedStr; }
 if (applySeedBtn){ applySeedBtn.onclick = ()=>{ setWorldSeed(seedInput.value.trim()||'default'); if (seedInput) seedInput.value=worldSeedStr; }; }
 if (randomSeedBtn){ randomSeedBtn.onclick = ()=>{ const s = Math.random().toString(36).slice(2,8); setWorldSeed(s); if (seedInput) seedInput.value=s; }; }
 
-// Inventory modal wiring
-const invEl = document.getElementById('inventory');
-const invGrid = document.getElementById('invGrid');
-const closeInvBtn = document.getElementById('closeInventory');
-const survivalToggle = document.getElementById('survivalToggle');
-if (openInvBtn) openInvBtn.onclick = ()=> toggleInventory();
-if (closeInvBtn) closeInvBtn.onclick = ()=> toggleInventory(false);
-if (survivalToggle) survivalToggle.checked = survival;
-if (survivalToggle) survivalToggle.onchange = ()=>{ survival = !!survivalToggle.checked; invSave(); updateHotbarCounts(); };
-window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='i'){ toggleInventory(); }});
-function toggleInventory(force){ if (!invEl) return; const next = (typeof force==='boolean')? force : (invEl.style.display!=='block'); invEl.style.display = next?'block':'none'; if (next) renderInventory(); }
-function renderInventory(){ if (!invGrid) return; invGrid.innerHTML=''; const ids=[GRASS,DIRT,STONE,SAND,WATER,WOOD,LEAVES,SNOW]; ids.forEach((id,i)=>{ const d=document.createElement('div'); d.className='invSlot'; d.dataset.id=''+id; d.textContent=hotbarNames[i]; const c=document.createElement('div'); c.className='count'; c.textContent=String(inventory.get(id)||0); d.appendChild(c); d.onclick=()=>{ selectedBlock=id; updateHotbarActive(); toggleInventory(false); }; invGrid.appendChild(d); }); }
+// Inventory UI removed
 
 // Keyboard shortcuts: undo/redo
 window.addEventListener('keydown', (e)=>{
@@ -1282,190 +1293,13 @@ function updateHotbar(sel){
 renderHotbar();
 
 // Toolbar undo/redo buttons already wired above
-
-// --- Multiplayer minimal client using server in run_voxelcraft.py ---
-// Delay initialization until after MP is defined
-window.addEventListener('load', ()=>{
-  // Ensure MP object exists before use
-  if (typeof MP === 'undefined') {
-    window.MP = { url:null, clientId:Math.random().toString(36).slice(2,10), peers:new Map(), connected:false, lastSend:0 };
-  }
-  function mpParseUrl(){
-    try{
-      const u = new URL(location.href);
-      const host = u.searchParams.get('host') || u.hostname || '127.0.0.1';
-      const port = u.searchParams.get('port') || u.port || '8000';
-      MP.url = `${u.protocol}//${host}:${port}`;
-      MP.room = (u.searchParams.get('room') || 'default');
-      MP.name = (u.searchParams.get('name') || `Player-${MP.clientId.slice(0,4)}`);
-    }catch{ MP.url = null; }
-  }
-  mpParseUrl();
-  function mpPost(evt){ if (!MP.url) return; const withRoom = Object.assign({ room: MP.room, name: MP.name }, evt); fetch(`${MP.url}/publish`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(withRoom) }).catch(()=>{}); }
-  function mpConnect(){
-    if (!MP.url) return;
-    try{
-      const es = new EventSource(`${MP.url}/events?room=${encodeURIComponent(MP.room||'default')}`);
-      es.onopen = ()=>{ MP.connected=true; };
-      es.onerror = ()=>{ MP.connected=false; };
-      es.onmessage = (ev)=>{
-        try{
-          const data = JSON.parse(ev.data);
-          if (data.type==='pos' && data.clientId){
-            if (data.clientId!==MP.clientId){
-              MP.peers.set(data.clientId, { x:data.x, y:data.y, z:data.z, color:data.color||[0.3,1,0.3], name:data.name, yaw:data.yaw||0, pitch:data.pitch||0, ts:performance.now() });
-            }
-          } else if (data.type==='edit' && data.clientId!==MP.clientId){
-            const [wx,wy,wz] = data.key.split(',').map(n=>parseInt(n,10));
-            setVoxelInternal(wx, wy, wz, data.id);
-            edits.set(data.key, data.id);
-            saveEdits();
-          } else if (data.type==='leave'){
-            MP.peers.delete(data.clientId);
-          }
-        }catch{}
-      };
-      // Pull initial snapshot to backfill peer list
-      fetch(`${MP.url}/snapshot?room=${encodeURIComponent(MP.room||'default')}`).then(r=>r.json()).then(snap=>{
-        try{
-          if (snap && snap.clients){
-            for (const [cid, p] of Object.entries(snap.clients)){
-              if (cid!==MP.clientId){ MP.peers.set(cid, { x:p.x, y:p.y, z:p.z, color:p.color||[0.3,1,0.3], name:p.name, yaw:p.yaw||0, pitch:p.pitch||0, ts:performance.now() }); }
-            }
-          }
-        }catch{}
-      }).catch(()=>{});
-      // announce our seed and initial position so others see us immediately
-      mpPost({ type:'seed', seed: worldSeedStr, clientId: MP.clientId, room: MP.room });
-      mpPost({ type:'pos', clientId: MP.clientId, x: cam.pos[0], y: cam.pos[1], z: cam.pos[2], color: MP.color, name: MP.name, room: MP.room });
-      window.addEventListener('beforeunload', ()=> mpPost({ type:'leave', clientId: MP.clientId }));
-    }catch{}
-  }
-  // Replace the module-scoped mpMaybeSend (module script, not global)
-  mpMaybeSend = function(nowMs){
-    if (!MP.url) return;
-    if (nowMs - MP.lastSend < 120) return;
-    MP.lastSend=nowMs;
-    mpPost({ type:'pos', clientId:MP.clientId, x:cam.pos[0], y:cam.pos[1], z:cam.pos[2], color:MP.color, name:MP.name, yaw:cam.rot[1], pitch:cam.rot[0] });
-  };
-  // Broadcast edits by wrapping setVoxel
-  const _setVoxel = setVoxel;
-  setVoxel = function(wx,wy,wz,id){ const ok = _setVoxel(wx,wy,wz,id); if (ok && MP.url){ mpPost({ type:'edit', clientId:MP.clientId, key:`${wx},${wy},${wz}`, id }); } return ok; };
-  mpConnect();
+// Add global key shortcuts for convenience
+window.addEventListener('keydown', (e)=>{
+  if (e.key==='F2'){ e.preventDefault(); captureScreenshot(true); }
+  if (e.key==='F9'){ e.preventDefault(); const s=Math.random().toString(36).slice(2,8); setWorldSeed(s); const si=document.getElementById('seedInput'); if (si) si.value=s; }
 });
 
-function drawPeers(){
-  if (!MP.peers || MP.peers.size===0) return;
-  gl.useProgram(linesProg);
-  gl.uniformMatrix4fv(uProjL, false, lastProj);
-  gl.uniformMatrix4fv(uViewL, false, lastView);
-  gl.uniform3f(uFogColL, currentSky[0], currentSky[1], currentSky[2]);
-  gl.uniform1f(uFogNearL, fogDistance*0.35);
-  gl.uniform1f(uFogFarL, fogDistance);
-  // Disable main program attributes to avoid WebGL complaining about enabled attribs without buffers
-  gl.disableVertexAttribArray(aPos);
-  gl.disableVertexAttribArray(aCol);
-  gl.disableVertexAttribArray(aNor);
-  // Ensure line program attribute location is valid
-  if (aPosL < 0) { gl.useProgram(prog); gl.enableVertexAttribArray(aPos); gl.enableVertexAttribArray(aCol); gl.enableVertexAttribArray(aNor); return; }
-  for (const [cid,p] of MP.peers.entries()){
-    const x=p.x, y=p.y-1.6, z=p.z;
-    const s=0.5;
-    // Solid colored cube as linesProg TRIANGLES with uniform color
-    const tri = new Float32Array([
-      // +Z face
-      x-s,y-s,z+s,  x+s,y-s,z+s,  x+s,y+s,z+s,
-      x-s,y-s,z+s,  x+s,y+s,z+s,  x-s,y+s,z+s,
-      // -Z face
-      x+s,y-s,z-s,  x-s,y-s,z-s,  x-s,y+s,z-s,
-      x+s,y-s,z-s,  x-s,y+s,z-s,  x+s,y+s,z-s,
-      // -X face
-      x-s,y-s,z-s,  x-s,y-s,z+s,  x-s,y+s,z+s,
-      x-s,y-s,z-s,  x-s,y+s,z+s,  x-s,y+s,z-s,
-      // +X face
-      x+s,y-s,z+s,  x+s,y-s,z-s,  x+s,y+s,z-s,
-      x+s,y-s,z+s,  x+s,y+s,z-s,  x+s,y+s,z+s,
-      // +Y face
-      x-s,y+s,z+s,  x+s,y+s,z+s,  x+s,y+s,z-s,
-      x-s,y+s,z+s,  x+s,y+s,z-s,  x-s,y+s,z-s,
-      // -Y face
-      x-s,y-s,z-s,  x+s,y-s,z-s,  x+s,y-s,z+s,
-      x-s,y-s,z-s,  x+s,y-s,z+s,  x-s,y-s,z+s,
-    ]);
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, tri, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(aPosL);
-    gl.vertexAttribPointer(aPosL, 3, gl.FLOAT, false, 3*4, 0);
-    const c = p.color || [0.9,0.4,0.4];
-    gl.uniform3f(uColorL, c[0], c[1], c[2]);
-    gl.drawArrays(gl.TRIANGLES, 0, tri.length/3);
-    gl.disableVertexAttribArray(aPosL);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
-    gl.deleteBuffer(vbo);
-    // Direction cone placed at the player's head, pointing exactly along look vector
-    const h = 0.8, r = 0.22; // cone length and base radius
-    const segments = 18;
-    const yaw = p.yaw || 0;
-    const pitch = p.pitch || 0;
-    // Head (eye) position
-    const head = [x, p.y, z];
-    // Forward vector from yaw/pitch (same convention as camera)
-    const cp = Math.cos(pitch), sp = Math.sin(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw);
-    const dir = [sy*cp, -sp, cy*cp];
-    // Build orthonormal basis (u,v) perpendicular to dir
-    const upRef = Math.abs(dir[1]) > 0.9 ? [1,0,0] : [0,1,0];
-    // u = normalize(cross(dir, upRef))
-    let ux = dir[1]*upRef[2] - dir[2]*upRef[1];
-    let uy = dir[2]*upRef[0] - dir[0]*upRef[2];
-    let uz = dir[0]*upRef[1] - dir[1]*upRef[0];
-    let ul = Math.hypot(ux,uy,uz) || 1; ux/=ul; uy/=ul; uz/=ul;
-    // v = cross(dir, u)
-    const vx = dir[1]*uz - dir[2]*uy;
-    const vy = dir[2]*ux - dir[0]*uz;
-    const vz = dir[0]*uy - dir[1]*ux;
-    // Tip of cone in front of head
-    const tip = [head[0] + dir[0]*h, head[1] + dir[1]*h, head[2] + dir[2]*h];
-    const verts = [];
-    for (let i=0;i<segments;i++){
-      const a0 = (i*(2*Math.PI/segments));
-      const a1 = ((i+1)*(2*Math.PI/segments));
-      const c0 = Math.cos(a0), s0 = Math.sin(a0);
-      const c1 = Math.cos(a1), s1 = Math.sin(a1);
-      const b0 = [ head[0] + (ux*c0 + vx*s0)*r, head[1] + (uy*c0 + vy*s0)*r, head[2] + (uz*c0 + vz*s0)*r ];
-      const b1 = [ head[0] + (ux*c1 + vx*s1)*r, head[1] + (uy*c1 + vy*s1)*r, head[2] + (uz*c1 + vz*s1)*r ];
-      verts.push(...tip, ...b0, ...b1);
-    }
-    const cone = new Float32Array(verts);
-    const vbo2 = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo2);
-    gl.bufferData(gl.ARRAY_BUFFER, cone, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(aPosL);
-    gl.vertexAttribPointer(aPosL, 3, gl.FLOAT, false, 3*4, 0);
-    gl.uniform3f(uColorL, Math.min(1,c[0]*1.2), Math.min(1,c[1]*1.2), Math.min(1,c[2]*1.2));
-    gl.drawArrays(gl.TRIANGLES, 0, cone.length/3);
-    gl.disableVertexAttribArray(aPosL);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
-    gl.deleteBuffer(vbo2);
-  }
-  gl.useProgram(prog);
-  gl.enableVertexAttribArray(aPos);
-  gl.enableVertexAttribArray(aCol);
-  gl.enableVertexAttribArray(aNor);
-}
-
-function updatePlayersOverlay(t){
-  const el = document.getElementById('players');
-  if (!el || !MP || !MP.peers) return;
-  // List local + peers in current room
-  const items = [];
-  items.push(`${MP.name || 'Me'} (you)`);
-  for (const [cid,p] of MP.peers.entries()){
-    const nm = p.name || `Player-${cid.slice(0,4)}`;
-    items.push(nm);
-  }
-  el.textContent = items.join('  •  ');
-}
+// Multiplayer removed
 
 function processBuildQueue(budget=3){
   if (buildQueue.length===0) return;
@@ -1544,17 +1378,7 @@ function draw(){
   gl.disable(gl.BLEND);
   gl.disable(gl.BLEND);
 
-  // Bio overlay pass (translucent)
-  if (bio.enabled || nca.enabled){
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.depthMask(false);
-    gl.uniform1f(uIsWater, 0.0);
-    bio.draw();
-    nca.draw();
-    gl.depthMask(true);
-    gl.disable(gl.BLEND);
-  }
+  // Experimental overlays removed
 
   // Draw highlight lines if any
   if (highlight && highlight.vbo && highlight.count){
@@ -1743,17 +1567,11 @@ let lastView = mat4_identity();
 let highlight = null;
 // Fallback no-op; multiplayer init will overwrite this at runtime
 let mpMaybeSend = function(){/* noop until MP connects */};
-// Multiplayer (SSE-like) client state (may be pre-created earlier)
-if (typeof MP === 'undefined') {
-  window.MP = { url:null, clientId:Math.random().toString(36).slice(2,10), peers:new Map(), connected:false, lastSend:0 };
-}
 function loop(t){
   const dt=Math.min(0.05, (t-last)/1000); last=t;
   if (!timePaused) timeSec += dt * timeSpeed;
   move(dt);
-  bio.update(dt);
-  nca.update(dt);
-  mpMaybeSend(t);
+  // overlays removed
   tryTeleport();
   updateMinimap();
   updateMinimap();
@@ -1791,21 +1609,18 @@ function loop(t){
 
   draw();
   const dbg = document.getElementById('debug');
-  const blockNames = ['AIR','GRASS','DIRT','STONE','SAND'];
+  const blockNames = ['AIR','GRASS','DIRT','STONE','SAND','WATER','WOOD','LEAVES','SNOW','PORTAL'];
   // FPS calc
   fpsCounter.frame(t);
   const tod = ((theta%(2*Math.PI))+2*Math.PI)%(2*Math.PI);
   const hour = (tod/(2*Math.PI))*24; // rough mapping
   const h = Math.floor(hour), m = Math.floor((hour-h)*60);
   if (dbg) {
-    dbg.textContent = `pos ${cam.pos.map(v=>v.toFixed(1)).join(', ')} chunks ${chunks.size} fog ${fogDistance} sel ${blockNames[selectedBlock]}  fps ${fpsCounter.fps.toFixed(0)}  time ${(''+h).padStart(2,'0')}:${(''+m).padStart(2,'0')} x${timeSpeed}${timePaused?' (paused)':''}${cam.walk?' WALK':' FLY'}  bio:${bio.enabled?'on':'off'}${bio.running?'':'(paused)'} S=${bio.states} T=${bio.threshold}  nca:${nca.enabled?'on':'off'}${nca.running?'':'(paused)'} C=${nca.C}`;
+    dbg.textContent = `pos ${cam.pos.map(v=>v.toFixed(1)).join(', ')} chunks ${chunks.size} fog ${fogDistance} sel ${blockNames[selectedBlock]}  fps ${fpsCounter.fps.toFixed(0)}  time ${(''+h).padStart(2,'0')}:${(''+m).padStart(2,'0')} x${timeSpeed}${timePaused?' (paused)':''}${cam.walk?' WALK':' FLY'}`;
   }
   // Update hotbar UI
   updateHotbar(selectedBlock);
-  // Peers
-  drawPeers();
-  // Update players overlay, if visible
-  updatePlayersOverlay(t);
+  // Multiplayer removed
   requestAnimationFrame(loop);
 }
 updateVisibleChunks();
@@ -1899,6 +1714,19 @@ const fpsCounter = (()=>{
 })();
 
 // drawMinimap is implemented earlier and called from updateVisibleChunks/draw
+
+// Screenshot utility. If download=true, trigger a save; otherwise return data URL
+function captureScreenshot(download=false){
+  try{
+    const url = canvas.toDataURL('image/png');
+    if (download){
+      const a = document.createElement('a');
+      a.href = url; a.download = 'voxelcraft.png';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    return url;
+  }catch(e){ console.warn('screenshot failed', e); return null; }
+}
 
 // Time controls: [ and ] to change speed, T to toggle pause, ; and ' to set noon/midnight
 window.addEventListener('keydown', (e)=>{
