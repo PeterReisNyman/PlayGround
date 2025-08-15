@@ -1,6 +1,0 @@
-{
-  "rc": 1,
-  "status": "fail",
-  "stdout": "",
-  "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nNameError: name 'hello' is not defined\n"
-}

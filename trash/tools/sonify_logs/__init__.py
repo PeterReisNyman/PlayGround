@@ -1,2 +1,0 @@
-"""Sonified Debugger for Logs"""
-
