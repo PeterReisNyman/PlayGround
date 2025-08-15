@@ -45,7 +45,7 @@ for h in range(144):
     # Probability: 1% per hour per realtor; amount: random between 1 and 20
     for realtor in realtors:
         print(realtor)
-        if random.random() < 0.01:
+        if random.random() < 0.001:
             amount = random.randint(1, 20)
             buy_credits(realtor, amount)
             print(f"{realtor['name']} bought {amount} credits. Now remaining: {realtor['remaining_credits']}, tier: {realtor['tier_value']}")

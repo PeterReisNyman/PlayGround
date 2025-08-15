@@ -34,6 +34,8 @@ import { MetricsService } from './metrics/metrics.service';
 import { FacebookController } from './facebook/facebook.controller';
 import { FacebookService } from './facebook/facebook.service';
 import { MetaService } from './meta/meta.service';
+import { LeadGenController } from './leadgen/leadgen.controller';
+import { LeadGenService } from './leadgen/leadgen.service';
 
 import { OpenAiService } from './agentHelp/openai.service';
 import { PromptService } from './agentHelp/prompt.service';
@@ -89,6 +91,7 @@ import { EmailService } from './email/email.service';
     CalendarController,
     SchedulerController,
     LeadsController,
+    LeadGenController,
     BookingController,
     RealtorController,
     SystemMessageController,
@@ -127,6 +130,7 @@ import { EmailService } from './email/email.service';
     MetricsService,
     FacebookService,
     MetaService,
+    LeadGenService,
   ],
 })
 export class AppModule {}

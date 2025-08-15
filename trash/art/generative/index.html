@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Generative Constellations</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #0b132b; color: #e0e8f9; font: 14px/1.4 system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      .hud { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 6px; }
+      .hud button { margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="hud">
+      <button id="reshuffle">Reshuffle</button>
+      <span id="info"></span>
+    </div>
+    <script>
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const info = document.getElementById('info');
+      const DPR = Math.max(1, devicePixelRatio || 1);
+      let points = [], links = [], t = 0, seed = 1;
+
+      function rand() {
+        // xorshift32 for deterministic randomness
+        seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 0xffffffff;
+      }
+
+      function resize() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        canvas.width = w * DPR; canvas.height = h * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        draw(true);
+      }
+
+      function setup() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        const N = Math.floor((w * h) / 14000) + 60; // density-based
+        points = Array.from({length: N}, () => ({
+          x: rand() * w,
+          y: rand() * h,
+          vx: (rand() - 0.5) * 0.6,
+          vy: (rand() - 0.5) * 0.6,
+          r: 1 + rand() * 2
+        }));
+        links = [];
+        for (let i = 0; i < N; i++) {
+          for (let j = i + 1; j < N; j++) {
+            const dx = points[i].x - points[j].x;
+            const dy = points[i].y - points[j].y;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < 90*90 && rand() < 0.08) links.push([i, j]);
+          }
+        }
+        info.textContent = `${N} stars, ${links.length} links`;
+      }
+
+      function step(dt) {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        for (const p of points) {
+          p.x += p.vx * dt; p.y += p.vy * dt;
+          if (p.x < -10) p.x = w + 10; if (p.x > w + 10) p.x = -10;
+          if (p.y < -10) p.y = h + 10; if (p.y > h + 10) p.y = -10;
+        }
+      }
+
+      function draw(force = false) {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        ctx.clearRect(0, 0, w, h);
+        // background gradient
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#0b132b');
+        g.addColorStop(1, '#1c2541');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+
+        // twinkle factor
+        const tw = 0.6 + 0.4 * Math.sin(t * 0.0013);
+        // stars
+        ctx.fillStyle = '#eef3ff';
+        for (const p of points) {
+          ctx.globalAlpha = 0.6 + 0.4 * Math.sin((p.x + p.y + t*0.2) * 0.02) * tw;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        // links
+        ctx.strokeStyle = '#7b93ff';
+        ctx.lineWidth = 0.7;
+        for (const [i, j] of links) {
+          const a = points[i], b = points[j];
+          ctx.globalAlpha = 0.12;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      let last = performance.now();
+      function loop(now) {
+        const dt = Math.min(50, now - last); last = now; t += dt;
+        step(dt * 0.06); draw(); requestAnimationFrame(loop);
+      }
+
+      window.addEventListener('resize', () => { resize(); setup(); });
+      document.getElementById('reshuffle').addEventListener('click', () => { seed = (seed * 1664525 + 1013904223) >>> 0; setup(); });
+      resize(); setup(); requestAnimationFrame(loop);
+    </script>
+  </body>
+  </html>
+
