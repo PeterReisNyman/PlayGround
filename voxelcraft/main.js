@@ -94,13 +94,14 @@ function mat4_lookAt(eye, center, up){
 // Camera and controls
 const cam = { pos:[0, 22, 0], rot:[-0.2, 0.6], vel:[0,0,0], walk:false, onGround:false };
 
-// World scale (1 block unit = 0.25 meters). Player should be ~8 blocks tall (≈2.0 m)
-const BLOCK_SIZE_M = 0.25;
-const PLAYER_HEIGHT_BLOCKS = 8.0;          // total height in blocks (~2.0 m)
+// World scale: size of one block in meters (tunable). Player is ~8 blocks tall.
+const BLOCK_SIZE_M = 0.33;
+const PLAYER_HEIGHT_BLOCKS = 8.0;          // total height in blocks
 const PLAYER_EYE_HEIGHT_BLOCKS = PLAYER_HEIGHT_BLOCKS - 0.1; // keep ~0.1 block head room
-const PLAYER_RADIUS_BLOCKS = 0.3;          // keep width similar for navigation
-const MAX_STEP_UP = 3.0;                    // auto step up to 3 blocks (75cm)
-const MAX_STEP_DOWN = 3.0;                  // allow stepping down up to 3 blocks
+const PLAYER_RADIUS_BLOCKS = 0.3;          // collision radius in blocks
+// Auto step limits (in blocks). We clamp stepping to ground-only to avoid mid-air boosts.
+const MAX_STEP_UP = 2.0;
+const MAX_STEP_DOWN = 0.0;
 let key = {}; window.addEventListener('keydown', e=> key[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e=> key[e.key.toLowerCase()] = false);
 const lockBtn = document.getElementById('lock');
@@ -177,8 +178,8 @@ function saveSettings(){
 // World/chunks
 const CHUNK = 32; // larger chunk to reduce overhead
 // Increase vertical resolution for towering mountains
-const WORLD_HEIGHT = 384; // taller world to allow towering mountains
-const WATER_LEVEL = 48; // adjust slightly relative to new height
+const WORLD_HEIGHT = 256; // restore to original vertical span
+const WATER_LEVEL = 40; // original water level
 // Aggressively reduce render distance for performance
 const viewDistance = { chunks: 2 };
 let fogDistance = 200; // closer fog for short render distance
@@ -204,15 +205,16 @@ function noise2(x, z){
 }
 
 function heightAt(x, z){
-  // Much taller mountains: lower frequency base with strong amplification
-  const base = noise2(x*0.01, z*0.01);
-  const ridge = 1 - Math.abs(2*noise2(x*0.02+100, z*0.02-100) - 1);
-  let h = 8 + Math.pow(0.5*base + 0.5*ridge, 1.8) * 120; // scale up massively
-  // Add some detail, but less noisy relative to big features
-  h += (noise2(x*0.06, z*0.06) - 0.5) * 10; // +/-5 detail
-  h += (1 - Math.abs(2*noise2(x*0.15+200, z*0.15+200) - 1)) * 6 - 3; // small ridges
+  // Smooth, long-wavelength terrain (8x horizontal scale) but taller overall
+  const base = noise2(x*0.001875, z*0.001875);                        // 0.015 / 8
+  const ridge = 1 - Math.abs(2*noise2(x*0.00375+100, z*0.00375-100) - 1); // 0.03 / 8
+  let h = 10 + Math.pow(0.5*base + 0.5*ridge, 1.55) * 110;            // taller but softer curve
+  // Gentle details at larger scale (keep smoothness)
+  h += (noise2(x*0.012, z*0.012) - 0.5) * 10;                          // soft detail
+  h += (1 - Math.abs(2*noise2(x*0.022+200, z*0.022+200) - 1)) * 5 - 2.5;
   return Math.max(0, Math.min(WORLD_HEIGHT-2, Math.floor(h)));
 }
+
 
 // --- Simple biome sampling using temperature and moisture ---
 function lerp(a,b,t){ return a + (b-a)*t; }
@@ -229,8 +231,8 @@ function temperatureAt(x, z){
 }
 // Moisture field varies at a different frequency; slightly wetter near sea level
 function moistureAt(x, z){
-  const base = noise2(x*0.01 - worldSeed*0.001, z*0.01 + worldSeed*0.001);
-  const mid  = noise2(x*0.05 + 333.77, z*0.05 - 987.11);
+  const base = noise2(x*0.005 - worldSeed*0.001, z*0.005 + worldSeed*0.001);
+  const mid  = noise2(x*0.02 + 333.77, z*0.02 - 987.11);
   const h = heightAt(x, z);
   let m = 0.6*base + 0.4*mid;
   // With lowered sea level, bias much wetter near coasts
@@ -657,11 +659,11 @@ function genChunk(cx, cz){
       for (let y=0; y<WORLD_HEIGHT; y++){
         let id=AIR;
         if (y<=hh){
-          if (hh < WATER_LEVEL + 3) id = (y>hh-2 ? SAND : STONE); // prevent deep sand columns
+          // Beach band near water -> sand; else grass/stone with altitude rules
+          if (hh < WATER_LEVEL + 3) id = (y>hh-2 ? SAND : STONE);
           else if (y===hh) {
-            if (biome===BIOME.DESERT) id = SAND;
-            else if (hh>42) id = SNOW;
-            else id = GRASS;
+            // No snow below high alpine threshold to avoid snow touching sand
+            if (hh>=90) id = SNOW; else if (biome===BIOME.DESERT) id = SAND; else id = GRASS;
           }
           else if (y>hh-3) id = (biome===BIOME.DESERT ? SAND : DIRT);
           else id = STONE;
@@ -891,9 +893,11 @@ uniform vec3 uFogCol; uniform float uFogNear; uniform float uFogFar;
 uniform vec3 uLightDir; uniform vec3 uLightColor; uniform vec3 uAmbient;
 uniform float uAlpha;
 void main(){
-  float ndl = max(dot(normalize(vNor), normalize(uLightDir)), 0.0);
-  // Basic lambert + cheap tonemap-like curve
-  vec3 lit = vCol * (uAmbient + uLightColor * ndl);
+  vec3 n = normalize(vNor);
+  float ndl = max(dot(n, normalize(uLightDir)), 0.0);
+  // Slight rim to avoid fully black backsides at night
+  float rim = pow(1.0 - max(dot(n, normalize(-uLightDir)), 0.0), 2.0) * 0.08;
+  vec3 lit = vCol * (uAmbient + uLightColor * ndl + rim);
   lit = lit / (lit + vec3(0.7));
   float f = smoothstep(uFogNear, uFogFar, vDist);
   vec3 col = mix(lit, uFogCol, f);
@@ -970,8 +974,10 @@ function updateViewProj(){
 
 // Movement
 function move(dt){
-  const base = cam.walk ? 7 : 18;
-  const speed = key['shift'] ? base*1.7 : base;
+  // Speed scaled by block size so meters/sec stays consistent
+  const WALK_MPS = 4.0, FLY_MPS = 12.0, SPRINT = 1.7;
+  const base = cam.walk ? (WALK_MPS / BLOCK_SIZE_M) : (FLY_MPS / BLOCK_SIZE_M);
+  const speed = key['shift'] ? base*SPRINT : base;
   const forward = [Math.sin(cam.rot[1]), 0, Math.cos(cam.rot[1])];
   const right = [Math.cos(cam.rot[1]), 0,-Math.sin(cam.rot[1])];
   if (!cam.walk){
@@ -986,7 +992,10 @@ function move(dt){
     return;
   }
   // Walk mode with gravity and simple ground collision (voxel AABB at feet)
-  const accel = [0, -30, 0];
+  // Physics scaled to block size: gravity ~9.8 m/s^2 downward
+  const meterPerBlock = BLOCK_SIZE_M;
+  const gravity = -9.8 / meterPerBlock; // blocks/s^2
+  const accel = [0, gravity, 0];
   const moveDir = [0,0,0];
   if (key['w']) { moveDir[0]+=Math.sin(cam.rot[1]); moveDir[2]+=Math.cos(cam.rot[1]); }
   if (key['s']) { moveDir[0]-=Math.sin(cam.rot[1]); moveDir[2]-=Math.cos(cam.rot[1]); }
@@ -996,8 +1005,10 @@ function move(dt){
   if (len>0){ moveDir[0]/=len; moveDir[2]/=len; }
   cam.vel[0] = moveDir[0]*speed;
   cam.vel[2] = moveDir[2]*speed;
-  // Jump
-  if (key[' '] && cam.onGround){ cam.vel[1] = 10; cam.onGround=false; }
+  // Jump: ~1 meter vertical reach regardless of block size
+  const desiredJumpMeters = 1.0;
+  const jumpVelBlocksPerSec = Math.sqrt(Math.max(0, 2 * (desiredJumpMeters/BLOCK_SIZE_M) * (-gravity)));
+  if (key[' '] && cam.onGround){ cam.vel[1] = jumpVelBlocksPerSec; cam.onGround=false; }
   cam.vel[1] += accel[1]*dt;
   // Attempt vertical move with ground and ceiling collision
   let nextY = cam.pos[1] + cam.vel[1]*dt;
@@ -1061,11 +1072,13 @@ function move(dt){
   if (!aabbBlocked(tryX, feetY, cam.pos[2])){
     cam.pos[0] = tryX;
   } else {
-    // Step-up assist: climb lips up to 3 blocks (75cm)
+    // Step-up assist: only when on ground, to avoid mid-air step boosting
     let stepped = false;
-    for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
-      if (!aabbBlocked(tryX, feetY + s, cam.pos[2])){
-        cam.pos[0] = tryX; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+    if (cam.onGround){
+      for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+        if (!aabbBlocked(tryX, feetY + s, cam.pos[2])){
+          cam.pos[0] = tryX; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+        }
       }
     }
     if (!stepped){
@@ -1081,11 +1094,13 @@ function move(dt){
   if (!aabbBlocked(cam.pos[0], feetY, tryZ)){
     cam.pos[2] = tryZ;
   } else {
-    // Step-up assist on Z axis
+    // Step-up assist on Z axis (grounded only)
     let stepped = false;
-    for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
-      if (!aabbBlocked(cam.pos[0], feetY + s, tryZ)){
-        cam.pos[2] = tryZ; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+    if (cam.onGround){
+      for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+        if (!aabbBlocked(cam.pos[0], feetY + s, tryZ)){
+          cam.pos[2] = tryZ; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
+        }
       }
     }
     if (!stepped){
