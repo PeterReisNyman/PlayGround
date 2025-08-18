@@ -178,6 +178,35 @@ def main():
                 self.end_headers()
                 self.wfile.write(b"{}")
                 return
+            if self.path.startswith("/save_screenshot"):
+                length = int(self.headers.get('content-length', '0') or 0)
+                body = self.rfile.read(length) if length else b"{}"
+                try:
+                    payload = json.loads(body.decode("utf-8"))
+                    data_url = payload.get("dataUrl", "")
+                except Exception:
+                    data_url = ""
+                # Expect data URL like data:image/png;base64,....
+                import base64, time
+                ok = False
+                filename = None
+                if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
+                    try:
+                        b64 = data_url.split(",", 1)[1]
+                        raw = base64.b64decode(b64)
+                        ts = time.strftime("%Y%m%d-%H%M%S")
+                        filename = f"Screenshot-{ts}.png"
+                        with open(filename, "wb") as out:
+                            out.write(raw)
+                        ok = True
+                    except Exception:
+                        ok = False
+                self.send_response(200 if ok else 400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                resp = {"ok": ok, "file": filename}
+                self.wfile.write(json.dumps(resp).encode("utf-8"))
+                return
             self.send_response(404)
             self.end_headers()
 

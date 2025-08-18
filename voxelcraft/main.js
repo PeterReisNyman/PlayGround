@@ -96,12 +96,15 @@ const cam = { pos:[0, 22, 0], rot:[-0.2, 0.6], vel:[0,0,0], walk:false, onGround
 
 // World scale: size of one block in meters (tunable). Player is ~8 blocks tall.
 const BLOCK_SIZE_M = 0.33;
-const PLAYER_HEIGHT_BLOCKS = 8.0;          // total height in blocks
+const PLAYER_HEIGHT_BLOCKS = 6.0;          // total height in blocks (player is 6 blocks tall)
 const PLAYER_EYE_HEIGHT_BLOCKS = PLAYER_HEIGHT_BLOCKS - 0.1; // keep ~0.1 block head room
-const PLAYER_RADIUS_BLOCKS = 0.3;          // collision radius in blocks
+const INTERACT_REACH_BLOCKS = 16;          // block interaction raycast distance
+// Make the player wider so they cannot fit through a 2-wide hole (need ~3-wide)
+const PLAYER_RADIUS_BLOCKS = 1.1;          // collision radius in blocks (~2.2 wide)
 // Auto step limits (in blocks). We clamp stepping to ground-only to avoid mid-air boosts.
-const MAX_STEP_UP = 2.0;
-const MAX_STEP_DOWN = 0.0;
+// Keep auto-step conservative to reduce oscillation and prevent unintended boosts
+const MAX_STEP_UP = 1.0;
+const MAX_STEP_DOWN = 0.5;
 let key = {}; window.addEventListener('keydown', e=> key[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e=> key[e.key.toLowerCase()] = false);
 const lockBtn = document.getElementById('lock');
@@ -176,12 +179,12 @@ function saveSettings(){
 }
 
 // World/chunks
-const CHUNK = 32; // larger chunk to reduce overhead
+const CHUNK = 32; // chunk size in blocks
 // Increase vertical resolution for towering mountains
 const WORLD_HEIGHT = 256; // restore to original vertical span
 const WATER_LEVEL = 40; // original water level
 // Aggressively reduce render distance for performance
-const viewDistance = { chunks: 2 };
+const viewDistance = { chunks: 4 }; // 4x the previous area (radius 4 instead of 2)
 let fogDistance = 200; // closer fog for short render distance
 let selectedBlock = 3; // default STONE
 let currentSky = [0.53, 0.69, 1.0];
@@ -717,6 +720,15 @@ function jitterColor(base, wx, wy, wz){
 function buildMesh(cx, cz, voxels){
   const solid=[]; // position (3) + color (3) + normal (3)
   const water=[]; // same layout; rendered in transparent pass
+  // Helper to read neighbor ID using world if stepping across chunk boundary
+  function neighborId(wx, wy, wz, nx, ny, nz){
+    if (nx>=0&&nx<CHUNK&&nz>=0&&nz<CHUNK){
+      return getVoxel(voxels, nx, ny, nz);
+    }
+    return getVoxelWorld(wx + (nx<0?-1: nx>=CHUNK?1:0),
+                         wy + (ny<0?-1: ny>=WORLD_HEIGHT?1:0),
+                         wz + (nz<0?-1: nz>=CHUNK?1:0));
+  }
   const portals=[]; // removed (no portals)
   for (let x=0;x<CHUNK;x++){
     for (let y=0;y<WORLD_HEIGHT;y++){
@@ -730,18 +742,23 @@ function buildMesh(cx, cz, voxels){
         // Occlusion culling: skip blocks fully surrounded by solids (except water/portal surfaces)
         if (id!==WATER){
           const nn = [
-            getVoxel(voxels,x+1,y,z), getVoxel(voxels,x-1,y,z),
-            getVoxel(voxels,x,y+1,z), getVoxel(voxels,x,y-1,z),
-            getVoxel(voxels,x,y,z+1), getVoxel(voxels,x,y,z-1)
+            neighborId(wx,wy,wz, x+1,y,z), neighborId(wx,wy,wz, x-1,y,z),
+            neighborId(wx,wy,wz, x,y+1,z), neighborId(wx,wy,wz, x,y-1,z),
+            neighborId(wx,wy,wz, x,y,z+1), neighborId(wx,wy,wz, x,y,z-1)
           ];
           if (nn.every(n=> n!==AIR && n!==WATER)) continue;
         }
-        // Skip rendering blocks immediately under water surface to reduce overdraw
-        if (id!==WATER && wy < WATER_LEVEL && getVoxel(voxels, x,wy+1,z)===WATER) continue;
         for (const f of faces){
           const nx=x+f.dir[0], ny=y+f.dir[1], nz=z+f.dir[2];
-          const neighbor = getVoxel(voxels, nx,ny,nz);
-          if (neighbor!==AIR && !(id===WATER && neighbor===WATER)) continue;
+          const neighbor = neighborId(wx,wy,wz, nx,ny,nz);
+          // Face culling rules:
+          // - For water blocks: draw only faces bordering AIR (skip water-water internal faces)
+          // - For non-water blocks: draw faces bordering AIR or WATER (so ocean floor/sides render under water)
+          if (id===WATER) {
+            if (neighbor!==AIR) continue;
+          } else {
+            if (neighbor!==AIR && neighbor!==WATER) continue;
+          }
           // Create two tris
           const v=f.verts;
           const p0=[wx+v[0][0], wy+v[0][1], wz+v[0][2]];
@@ -873,10 +890,10 @@ function getVoxelWorld(wx, wy, wz){
 const vs = `
 attribute vec3 aPos; attribute vec3 aCol; attribute vec3 aNor;
 uniform mat4 uProj, uView; uniform float uIsWater; uniform float uTime;
-varying vec3 vCol; varying float vDist; varying vec3 vNor;
+varying vec3 vCol; varying float vDist; varying vec3 vNor; varying float vY;
 void main(){
   vec3 pos = aPos;
-  // Apply subtle waves to top faces of water during transparent pass
+  // Subtle waves for water top faces during transparent pass
   if (uIsWater > 0.5 && aNor.y > 0.5){
     float w = sin(pos.x*0.07 + uTime*1.2)*0.04 + cos(pos.z*0.05 + uTime*0.8)*0.04;
     pos.y += w;
@@ -885,13 +902,14 @@ void main(){
   vDist = length(wp.xyz);
   vCol = aCol;
   vNor = aNor;
+  vY = pos.y;
   gl_Position = uProj * wp;
 }`;
 const fs = `
-precision mediump float; varying vec3 vCol; varying float vDist; varying vec3 vNor;
+precision mediump float; varying vec3 vCol; varying float vDist; varying vec3 vNor; varying float vY;
 uniform vec3 uFogCol; uniform float uFogNear; uniform float uFogFar;
 uniform vec3 uLightDir; uniform vec3 uLightColor; uniform vec3 uAmbient;
-uniform float uAlpha;
+uniform float uAlpha; uniform float uCamY; uniform float uWaterLevel; uniform vec3 uUnderTint;
 void main(){
   vec3 n = normalize(vNor);
   float ndl = max(dot(n, normalize(uLightDir)), 0.0);
@@ -901,6 +919,10 @@ void main(){
   lit = lit / (lit + vec3(0.7));
   float f = smoothstep(uFogNear, uFogFar, vDist);
   vec3 col = mix(lit, uFogCol, f);
+  // Underwater view: dim and tint everything when camera is below water level
+  if (uCamY < uWaterLevel){
+    col = mix(col * 0.55, uUnderTint, 0.35);
+  }
   gl_FragColor = vec4(col, uAlpha);
 }`;
 
@@ -922,6 +944,9 @@ const uAmbient = gl.getUniformLocation(prog, 'uAmbient');
 const uAlpha = gl.getUniformLocation(prog, 'uAlpha');
 const uIsWater = gl.getUniformLocation(prog, 'uIsWater');
 const uTime = gl.getUniformLocation(prog, 'uTime');
+const uCamY = gl.getUniformLocation(prog, 'uCamY');
+const uWaterLevel = gl.getUniformLocation(prog, 'uWaterLevel');
+const uUnderTint = gl.getUniformLocation(prog, 'uUnderTint');
 
 gl.enableVertexAttribArray(aPos);
 gl.enableVertexAttribArray(aCol);
@@ -1005,8 +1030,8 @@ function move(dt){
   if (len>0){ moveDir[0]/=len; moveDir[2]/=len; }
   cam.vel[0] = moveDir[0]*speed;
   cam.vel[2] = moveDir[2]*speed;
-  // Jump: ~1 meter vertical reach regardless of block size
-  const desiredJumpMeters = 1.0;
+  // Jump: ~1 meter vertical reach regardless of block size (tunable)
+  const desiredJumpMeters = 1.2; // raise to ensure 3-block jumps at 0.33 m/block
   const jumpVelBlocksPerSec = Math.sqrt(Math.max(0, 2 * (desiredJumpMeters/BLOCK_SIZE_M) * (-gravity)));
   if (key[' '] && cam.onGround){ cam.vel[1] = jumpVelBlocksPerSec; cam.onGround=false; }
   cam.vel[1] += accel[1]*dt;
@@ -1017,12 +1042,29 @@ function move(dt){
   let feetY = nextY - eyeToFeet;
   const wx0 = Math.floor(cam.pos[0]);
   const wz0 = Math.floor(cam.pos[2]);
-  const under = getVoxelWorld(wx0, Math.floor(feetY + 1e-4), wz0);
-  if (under!==AIR && under!==WATER && feetY<Math.floor(feetY)+1 - 1e-4){
-    cam.onGround = true;
-    cam.vel[1] = 0;
-    // snap feet to top of block
-    cam.pos[1] = Math.floor(feetY)+1 + eyeToFeet + 1e-4;
+  // Robust ground snap: detect surface under multiple offsets and snap if close
+  function surfaceY(x,z,guess){
+    const offsets=[[0,0],[PLAYER_RADIUS_BLOCKS*0.7,0],[-PLAYER_RADIUS_BLOCKS*0.7,0],[0,PLAYER_RADIUS_BLOCKS*0.7],[0,-PLAYER_RADIUS_BLOCKS*0.7]];
+    let best=-Infinity;
+    for (let i=0;i<offsets.length;i++){
+      const ox=Math.floor(x+offsets[i][0]);
+      const oz=Math.floor(z+offsets[i][1]);
+      const y0=Math.floor(guess)+2;
+      for (let y=y0;y>=y0-6;y--){
+        const below=getVoxelWorld(ox,y-1,oz), cur=getVoxelWorld(ox,y,oz);
+        if ((below!==AIR && below!==WATER) && (cur===AIR || cur===WATER)){
+          // Pick the highest surface level encountered
+          best = y > best ? y : best;
+          break;
+        }
+      }
+    }
+    return best;
+  }
+  const surf = surfaceY(cam.pos[0], cam.pos[2], feetY);
+  const gap = feetY - surf;
+  if (surf>-Infinity && gap<0.25 && cam.vel[1]<=0){
+    cam.onGround=true; cam.vel[1]=0; cam.pos[1]=surf + eyeToFeet + 1e-4;
   } else {
     cam.onGround = false;
     // Ceiling collision: if head intersects a solid block, push down
@@ -1075,7 +1117,7 @@ function move(dt){
     // Step-up assist: only when on ground, to avoid mid-air step boosting
     let stepped = false;
     if (cam.onGround){
-      for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+      for (let s=0.25; s<=MAX_STEP_UP; s+=0.25){
         if (!aabbBlocked(tryX, feetY + s, cam.pos[2])){
           cam.pos[0] = tryX; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
         }
@@ -1083,7 +1125,7 @@ function move(dt){
     }
     if (!stepped){
       // Step-down assist: allow moving if we can step down up to 3 blocks at destination
-      if (!aabbBlocked(tryX, feetY - MAX_STEP_DOWN, cam.pos[2])){
+      if (MAX_STEP_DOWN>0 && !aabbBlocked(tryX, feetY - MAX_STEP_DOWN, cam.pos[2])){
         cam.pos[0] = tryX; cam.pos[1] -= MAX_STEP_DOWN; feetY = cam.pos[1] - eyeToFeet;
       } else {
         cam.vel[0] = 0;
@@ -1097,14 +1139,14 @@ function move(dt){
     // Step-up assist on Z axis (grounded only)
     let stepped = false;
     if (cam.onGround){
-      for (let s=0.5; s<=MAX_STEP_UP; s+=0.5){
+      for (let s=0.25; s<=MAX_STEP_UP; s+=0.25){
         if (!aabbBlocked(cam.pos[0], feetY + s, tryZ)){
           cam.pos[2] = tryZ; cam.pos[1] += s; feetY = cam.pos[1] - eyeToFeet; stepped = true; break;
         }
       }
     }
     if (!stepped){
-      if (!aabbBlocked(cam.pos[0], feetY - MAX_STEP_DOWN, tryZ)){
+      if (MAX_STEP_DOWN>0 && !aabbBlocked(cam.pos[0], feetY - MAX_STEP_DOWN, tryZ)){
         cam.pos[2] = tryZ; cam.pos[1] -= MAX_STEP_DOWN; feetY = cam.pos[1] - eyeToFeet;
       } else {
         cam.vel[2] = 0;
@@ -1155,6 +1197,11 @@ const exportBtn = document.getElementById('exportEdits');
 const importBtn = document.getElementById('importEdits');
 const clearBtn = document.getElementById('clearEdits');
 const shotBtn = document.getElementById('screenshot');
+const saveShotRepoBtn = document.getElementById('saveShotRepo');
+const assistBtn = document.getElementById('assistSave');
+const assistAutoBtn = document.getElementById('assistAuto');
+const assistStatus = document.getElementById('assistStatus');
+let assistAuto = false
 // Undo/Redo buttons removed in minimal build
 const lodBtn = document.getElementById('lodBtn');
 
@@ -1194,6 +1241,13 @@ if (clearBtn) clearBtn.onclick = ()=>{
   updateVisibleChunks();
 };
 if (shotBtn) shotBtn.onclick = ()=> captureScreenshot(true);
+if (assistBtn) assistBtn.onclick = async ()=>{
+  if (assistStatus) assistStatus.textContent = 'Sending...';
+  const file = await saveScreenshotToRepo();
+  if (assistStatus) assistStatus.textContent = file ? (`Saved ${file} for assistant`) : 'Failed to save screenshot';
+};
+if (saveShotRepoBtn) saveShotRepoBtn.onclick = ()=> saveScreenshotToRepo();
+if (assistAutoBtn) assistAutoBtn.onclick = ()=>{ assistAuto = !assistAuto; assistAutoBtn.textContent = `Auto: ${assistAuto ? 'On' : 'Off'}`; };
 
 // Inventory/survival removed for minimal experience; always creative
 let survival = false;
@@ -1252,6 +1306,8 @@ renderHotbar();
 window.addEventListener('keydown', (e)=>{
   if (e.key==='F2'){ e.preventDefault(); captureScreenshot(true); }
   if (e.key==='F9'){ e.preventDefault(); const s=Math.random().toString(36).slice(2,8); setWorldSeed(s); const si=document.getElementById('seedInput'); if (si) si.value=s; }
+  if (e.shiftKey && e.key==='F2'){ e.preventDefault(); (async()=>{ if (assistStatus) assistStatus.textContent='Sending...'; const f=await saveScreenshotToRepo(); if (assistStatus) assistStatus.textContent=f?`Saved ${f} for assistant`:'Failed to save screenshot'; })(); }
+  if (e.key.toLowerCase()==='y'){ e.preventDefault(); plantCoolTreesAround(28, 14); }
 });
 
 // Multiplayer removed
@@ -1304,6 +1360,9 @@ function draw(){
   gl.useProgram(prog);
   gl.uniform1f(uTime, timeSec);
   gl.uniform1f(uIsWater, 0.0);
+  gl.uniform1f(uCamY, cam.pos[1]);
+  gl.uniform1f(uWaterLevel, WATER_LEVEL+0.01);
+  gl.uniform3f(uUnderTint, 0.1, 0.18, 0.24);
   for (const ent of chunks.values()){
     if (!ent.solidVBO || ent.solidCount===0) continue;
     gl.bindBuffer(gl.ARRAY_BUFFER, ent.solidVBO);
@@ -1315,7 +1374,7 @@ function draw(){
     gl.drawArrays(gl.TRIANGLES, 0, ent.solidCount);
   }
 
-  // Transparent water pass
+  // Transparent water pass using per-chunk water geometry (renders actual water blocks)
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.depthMask(false);
@@ -1326,11 +1385,10 @@ function draw(){
     gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 9*4, 0);
     gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 9*4, 3*4);
     gl.vertexAttribPointer(aNor, 3, gl.FLOAT, false, 9*4, 6*4);
-    gl.uniform1f(uAlpha, 0.6);
+    gl.uniform1f(uAlpha, 0.7);
     gl.drawArrays(gl.TRIANGLES, 0, ent.waterCount);
   }
   gl.depthMask(true);
-  gl.disable(gl.BLEND);
   gl.disable(gl.BLEND);
 
   // Experimental overlays removed
@@ -1345,12 +1403,17 @@ function draw(){
     gl.uniform3f(uFogColL, currentSky[0], currentSky[1], currentSky[2]);
     gl.uniform1f(uFogNearL, fogDistance*0.35);
     gl.uniform1f(uFogFarL, fogDistance);
+    // Disable main program attributes to avoid WebGL errors when drawing with a different program
+    gl.disableVertexAttribArray(aPos);
+    gl.disableVertexAttribArray(aCol);
+    gl.disableVertexAttribArray(aNor);
     gl.bindBuffer(gl.ARRAY_BUFFER, highlight.vbo);
     gl.enableVertexAttribArray(aPosL);
     gl.vertexAttribPointer(aPosL, 3, gl.FLOAT, false, 3*4, 0);
     gl.drawArrays(gl.LINES, 0, highlight.count);
-    // Do not disable attribute arrays here; attribute indices are global across programs.
-    // Switch back to main program and ensure its attributes are enabled.
+    // Clean up line attribute to prevent it staying enabled across programs
+    gl.disableVertexAttribArray(aPosL);
+    // Switch back to main program and ensure its attributes are enabled again for subsequent passes
     gl.useProgram(prog);
     gl.enableVertexAttribArray(aPos);
     gl.enableVertexAttribArray(aCol);
@@ -1411,7 +1474,7 @@ function dirFromRot(pitch, yaw){
   return [sy*cp, -sp, cy*cp];
 }
 
-function raycast(maxDist=8){
+function raycast(maxDist=INTERACT_REACH_BLOCKS){
   const dir = dirFromRot(cam.rot[0], cam.rot[1]);
   let x = cam.pos[0], y = cam.pos[1], z = cam.pos[2];
   // step and tDelta according to 3D DDA
@@ -1444,7 +1507,7 @@ function raycast(maxDist=8){
 // Portals removed
 
 function placeOrRemove(type){
-  const res = raycast(8);
+  const res = raycast(INTERACT_REACH_BLOCKS);
   if (!res.hit) return;
   if (type==='remove'){
     const prev = getVoxelWorld(res.x, res.y, res.z);
@@ -1470,7 +1533,7 @@ canvas.addEventListener('mousedown', (e)=>{
 canvas.addEventListener('mousedown', (e)=>{
   if (document.pointerLockElement!==canvas && e.button!==1) return;
   if (e.button===1){
-    const hit = raycast(8);
+    const hit = raycast(INTERACT_REACH_BLOCKS);
     if (hit.hit){
       const id = getVoxelWorld(hit.x, hit.y, hit.z);
       if (id!==AIR) { selectedBlock = id; updateHotbarActive(); }
@@ -1534,6 +1597,14 @@ function loop(t){
   gl.uniform3f(uFogCol, currentSky[0], currentSky[1], currentSky[2]);
 
   draw();
+  // Assistant auto-capture: once per ~2s when enabled
+  if (typeof assistAuto !== 'undefined' && assistAuto){
+    if (!loop._lastShot || (t - loop._lastShot) > 2000){
+      loop._lastShot = t;
+      saveScreenshotToRepo();
+      if (assistStatus) assistStatus.textContent = 'Auto-sent view for assistant';
+    }
+  }
   const dbg = document.getElementById('debug');
   const blockNames = ['AIR','GRASS','DIRT','STONE','SAND','WATER','WOOD','LEAVES','SNOW'];
   // FPS calc
@@ -1621,6 +1692,19 @@ function captureScreenshot(download=false){
     }
     return url;
   }catch(e){ console.warn('screenshot failed', e); return null; }
+}
+
+
+// Save screenshot into server (repo directory) via local HTTP endpoint
+async function saveScreenshotToRepo(){
+  try{
+    const dataUrl = captureScreenshot(false);
+    const res = await fetch('./save_screenshot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dataUrl }) });
+    const j = await res.json().catch(()=>({ok:false}));
+    if (!j.ok) throw new Error('save failed');
+    console.log('Saved screenshot as', j.file);
+    return j.file;
+  }catch(err){ console.warn('saveScreenshotToRepo failed', err); return null; }
 }
 
 // Time controls: [ and ] to change speed, T to toggle pause, ; and ' to set noon/midnight

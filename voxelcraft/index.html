@@ -38,6 +38,13 @@
       <div id="lock">Click to Lock Pointer</div>
     </div>
 
+    <!-- Assistant panel: lets you send a screenshot to the repo for analysis -->
+    <div id="assistantPanel" style="position:absolute; left:10px; bottom:12px; display:flex; gap:8px; align-items:center; color:#fff; font: 12px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; text-shadow:0 1px 2px rgba(0,0,0,0.6);">
+      <button id="assistSave" title="Send current view for assistant (Shift+F2)" style="padding:6px 8px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; color: #fff; cursor: pointer;">Send to Assistant</button>
+      <button id="assistAuto" title="Toggle auto-capture for assistant (Shift+A)" style="padding:6px 8px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; color: #fff; cursor: pointer;">Auto: Off</button>
+      <span id="assistStatus" style="opacity:0.9;"></span>
+    </div>
+
     <!-- Minimap -->
       <!-- Minimap removed for minimal build -->
 
@@ -46,7 +53,8 @@
       <button id="exportEdits" title="Export placed blocks">Export</button>
       <button id="importEdits" title="Import placed blocks">Import</button>
       <button id="clearEdits" title="Clear all local edits">Clear Edits</button>
-      <button id="screenshot" title="Save screenshot">Screenshot</button>
+      <button id="screenshot" title="Save screenshot (download)">Screenshot</button>
+      <button id="saveShotRepo" title="Save screenshot into repo">Save Shot</button>
       <!-- Undo/Redo removed for minimal build -->
       <button id="lodBtn" title="Toggle far terrain LOD">Far LOD</button>
       <div style="display:flex; gap:6px; align-items:center;">
