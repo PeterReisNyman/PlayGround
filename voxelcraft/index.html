@@ -33,7 +33,7 @@
 
     <!-- Overlay: instructions, debug, and pointer lock button -->
     <div id="overlay">
-      <div id="instructions">WASD to move, Mouse to look, G toggle walk/fly, F2 screenshot, F9 new world</div>
+      <div id="instructions">WASD to move, Mouse to look, G: Free Cam, F2 screenshot, F9 new world</div>
       <div id="debug"></div>
       <div id="lock">Click to Lock Pointer</div>
     </div>
@@ -57,6 +57,7 @@
       <button id="saveShotRepo" title="Save screenshot into repo">Save Shot</button>
       <!-- Undo/Redo removed for minimal build -->
       <button id="lodBtn" title="Toggle far terrain LOD">Far LOD</button>
+      <button id="noFlyBtn" title="Disable/enable flying for player">No Fly: Off</button>
       <div style="display:flex; gap:6px; align-items:center;">
         <input id="seedInput" type="text" placeholder="Seed" style="width:140px; padding:4px 6px; border-radius:4px; border:1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.25); color:#fff;">
         <button id="applySeed" title="Regenerate with seed">Apply Seed</button>

@@ -92,7 +92,9 @@ function mat4_lookAt(eye, center, up){
 }
 
 // Camera and controls
-const cam = { pos:[0, 22, 0], rot:[-0.2, 0.6], vel:[0,0,0], walk:false, onGround:false };
+const cam = { pos:[0, 120, 0], rot:[-0.2, 0.6], vel:[0,0,0], walk:false, onGround:false };
+// Detached free camera for inspection
+const freeCam = { enabled:false, pos:[0, 123, -6], rot:[-0.2, 0.6] };
 
 // World scale: size of one block in meters (tunable). Player is ~8 blocks tall.
 const BLOCK_SIZE_M = 0.33;
@@ -119,13 +121,29 @@ if (lockBtn){
   // Minimal UI: click canvas to lock pointer if no lock button exists
   canvas.addEventListener('click', ()=>{ if (document.pointerLockElement!==canvas) canvas.requestPointerLock(); });
 }
-document.addEventListener('mousemove', e=>{ if (document.pointerLockElement===canvas){ cam.rot[1] -= e.movementX*0.0025; cam.rot[0] -= e.movementY*0.0025; cam.rot[0]=Math.max(-Math.PI/2+0.001, Math.min(Math.PI/2-0.001, cam.rot[0])); }});
+document.addEventListener('mousemove', e=>{
+  if (document.pointerLockElement!==canvas) return;
+  const target = freeCam.enabled ? freeCam : cam;
+  target.rot[1] -= e.movementX*0.0025;
+  target.rot[0] -= e.movementY*0.0025;
+  target.rot[0] = Math.max(-Math.PI/2+0.001, Math.min(Math.PI/2-0.001, target.rot[0]));
+});
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 // Toggle walk/fly mode with G, fog +/- and number keys 1..8 to select blocks
 window.addEventListener('keydown', (e)=>{
   const k = e.key;
   // H key previously toggled minimap; minimap removed
-  if (k.toLowerCase()==='g') { cam.walk = !cam.walk; saveSettings(); }
+  if (k.toLowerCase()==='g') { // Toggle free cam
+    freeCam.enabled = !freeCam.enabled;
+    if (freeCam.enabled){
+      // Start free cam a bit behind and above the player
+      freeCam.pos[0] = cam.pos[0] - Math.sin(cam.rot[1])*6;
+      freeCam.pos[2] = cam.pos[2] - Math.cos(cam.rot[1])*6;
+      freeCam.pos[1] = cam.pos[1] + 3;
+      freeCam.rot[0] = cam.rot[0];
+      freeCam.rot[1] = cam.rot[1];
+    }
+  }
   if (k === '+') { fogDistance = Math.min(2000, fogDistance + 50); saveSettings(); }
   if (k === '-') { fogDistance = Math.max(100, fogDistance - 50); saveSettings(); }
   if (k === '1') { selectedBlock = GRASS; updateHotbar(selectedBlock); }
@@ -988,17 +1006,35 @@ function updateViewProj(){
   // Extend far plane to accommodate distant horizon geometry
   const farPlane = Math.max(800, fogDistance*2.5, farLOD.enabled ? farLOD.radius*2 : 0);
   const proj = mat4_perspective((fovDeg*Math.PI/180), aspect, 0.1, farPlane);
-  const cp=Math.cos(cam.rot[0]), sp=Math.sin(cam.rot[0]);
-  const cy=Math.cos(cam.rot[1]), sy=Math.sin(cam.rot[1]);
+  const viewRef = freeCam.enabled ? freeCam : cam;
+  const cp=Math.cos(viewRef.rot[0]), sp=Math.sin(viewRef.rot[0]);
+  const cy=Math.cos(viewRef.rot[1]), sy=Math.sin(viewRef.rot[1]);
   const fwd = [sy*cp, -sp, cy*cp];
-  const center = [cam.pos[0]+fwd[0], cam.pos[1]+fwd[1], cam.pos[2]+fwd[2]];
-  const view = mat4_lookAt(cam.pos, center, [0,1,0]);
+  const center = [viewRef.pos[0]+fwd[0], viewRef.pos[1]+fwd[1], viewRef.pos[2]+fwd[2]];
+  const view = mat4_lookAt(viewRef.pos, center, [0,1,0]);
   gl.uniformMatrix4fv(uProj, false, proj);
   gl.uniformMatrix4fv(uView, false, view);
 }
 
 // Movement
 function move(dt){
+  // If free camera is active, freeze the player and move only the camera
+  if (freeCam.enabled){
+    const base = 12.0 / BLOCK_SIZE_M; // freecam speed in blocks/s
+    const speed = key['shift'] ? base*1.7 : base;
+    const cp=Math.cos(freeCam.rot[0]), sp=Math.sin(freeCam.rot[0]);
+    const cy=Math.cos(freeCam.rot[1]), sy=Math.sin(freeCam.rot[1]);
+    const fwd = [sy*cp, -sp, cy*cp]; // full 3D forward for freecam
+    const right = [cy, 0, -sy];
+    const up = [0,1,0];
+    if (key['w']) { freeCam.pos[0]+=fwd[0]*dt*speed; freeCam.pos[1]+=fwd[1]*dt*speed; freeCam.pos[2]+=fwd[2]*dt*speed; }
+    if (key['s']) { freeCam.pos[0]-=fwd[0]*dt*speed; freeCam.pos[1]-=fwd[1]*dt*speed; freeCam.pos[2]-=fwd[2]*dt*speed; }
+    if (key['a']) { freeCam.pos[0]-=right[0]*dt*speed; freeCam.pos[2]-=right[2]*dt*speed; }
+    if (key['d']) { freeCam.pos[0]+=right[0]*dt*speed; freeCam.pos[2]+=right[2]*dt*speed; }
+    if (key[' ']) freeCam.pos[1]+=dt*speed;
+    if (key['shift']) freeCam.pos[1]-=dt*speed;
+    return;
+  }
   // Speed scaled by block size so meters/sec stays consistent
   const WALK_MPS = 4.0, FLY_MPS = 12.0, SPRINT = 1.7;
   const base = cam.walk ? (WALK_MPS / BLOCK_SIZE_M) : (FLY_MPS / BLOCK_SIZE_M);
@@ -1204,6 +1240,7 @@ const assistStatus = document.getElementById('assistStatus');
 let assistAuto = false
 // Undo/Redo buttons removed in minimal build
 const lodBtn = document.getElementById('lodBtn');
+const noFlyBtn = document.getElementById('noFlyBtn');
 
 if (exportBtn) exportBtn.onclick = ()=>{
   const obj = {}; for (const [k,v] of edits) obj[k]=v;
@@ -1253,6 +1290,11 @@ if (assistAutoBtn) assistAutoBtn.onclick = ()=>{ assistAuto = !assistAuto; assis
 let survival = false;
 function updateHotbarCounts(){ /* no-op in creative */ }
 if (lodBtn) lodBtn.onclick = ()=>{ farLOD.enabled = !farLOD.enabled; };
+if (noFlyBtn){
+  const syncNoFly = ()=>{ noFlyBtn.textContent = `No Fly: ${cam.walk ? 'On' : 'Off'}`; };
+  noFlyBtn.onclick = ()=>{ cam.walk = !cam.walk; saveSettings(); syncNoFly(); };
+  syncNoFly();
+}
 
 // Seed UI wiring
 const seedInput = document.getElementById('seedInput');
@@ -1420,6 +1462,29 @@ function draw(){
     gl.enableVertexAttribArray(aNor);
   }
 
+  // Draw player hitbox wireframe
+  if (playerBox && playerBox.vbo && playerBox.count){
+    gl.useProgram(linesProg);
+    gl.uniformMatrix4fv(uProjL, false, lastProj);
+    gl.uniformMatrix4fv(uViewL, false, lastView);
+    gl.uniform3f(uColorL, 0.3, 1.0, 1.0);
+    gl.uniform3f(uFogColL, currentSky[0], currentSky[1], currentSky[2]);
+    gl.uniform1f(uFogNearL, fogDistance*0.35);
+    gl.uniform1f(uFogFarL, fogDistance);
+    gl.disableVertexAttribArray(aPos);
+    gl.disableVertexAttribArray(aCol);
+    gl.disableVertexAttribArray(aNor);
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBox.vbo);
+    gl.enableVertexAttribArray(aPosL);
+    gl.vertexAttribPointer(aPosL, 3, gl.FLOAT, false, 3*4, 0);
+    gl.drawArrays(gl.LINES, 0, playerBox.count);
+    gl.disableVertexAttribArray(aPosL);
+    gl.useProgram(prog);
+    gl.enableVertexAttribArray(aPos);
+    gl.enableVertexAttribArray(aCol);
+    gl.enableVertexAttribArray(aNor);
+  }
+
   // Far horizon pass: render simplified distant terrain as a height fog dome
   if (farLOD.enabled){
     gl.useProgram(prog);
@@ -1555,6 +1620,7 @@ let timeSpeed = 1.0; // 1.0 == normal, can be sped up/down
 let lastProj = mat4_identity();
 let lastView = mat4_identity();
 let highlight = null;
+let playerBox = null;
 // Fallback no-op; multiplayer init will overwrite this at runtime
 let mpMaybeSend = function(){/* noop until MP connects */};
 function loop(t){
@@ -1627,11 +1693,12 @@ requestAnimationFrame(loop);
 function captureViewProj(){
   const aspect = canvas.width / canvas.height;
   lastProj = mat4_perspective((fovDeg*Math.PI/180), aspect, 0.1, 2000);
-  const cp=Math.cos(cam.rot[0]), sp=Math.sin(cam.rot[0]);
-  const cy=Math.cos(cam.rot[1]), sy=Math.sin(cam.rot[1]);
+  const viewRef = freeCam.enabled ? freeCam : cam;
+  const cp=Math.cos(viewRef.rot[0]), sp=Math.sin(viewRef.rot[0]);
+  const cy=Math.cos(viewRef.rot[1]), sy=Math.sin(viewRef.rot[1]);
   const fwd = [sy*cp, -sp, cy*cp];
-  const center = [cam.pos[0]+fwd[0], cam.pos[1]+fwd[1], cam.pos[2]+fwd[2]];
-  lastView = mat4_lookAt(cam.pos, center, [0,1,0]);
+  const center = [viewRef.pos[0]+fwd[0], viewRef.pos[1]+fwd[1], viewRef.pos[2]+fwd[2]];
+  lastView = mat4_lookAt(viewRef.pos, center, [0,1,0]);
 }
 const _oldUpdateViewProj = updateViewProj;
 updateViewProj = function(){ _oldUpdateViewProj(); captureViewProj();
@@ -1653,6 +1720,17 @@ updateViewProj = function(){ _oldUpdateViewProj(); captureViewProj();
     if (highlight && highlight.vbo){ gl.deleteBuffer(highlight.vbo); }
     highlight = null;
   }
+  // Update player hitbox wireframe each frame
+  const r = PLAYER_RADIUS_BLOCKS;
+  const h = PLAYER_HEIGHT_BLOCKS;
+  const feetY = cam.pos[1] - PLAYER_EYE_HEIGHT_BLOCKS;
+  const linesPB = buildWireAABB(cam.pos[0]-r, feetY, cam.pos[0]+r, feetY+h, cam.pos[2]-r, cam.pos[2]+r);
+  if (!playerBox) playerBox = {};
+  if (playerBox.vbo) gl.deleteBuffer(playerBox.vbo);
+  playerBox.vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, playerBox.vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(linesPB), gl.DYNAMIC_DRAW);
+  playerBox.count = linesPB.length/3;
 };
 
 function buildWireCube(x,y,z){
@@ -1664,6 +1742,21 @@ function buildWireCube(x,y,z){
     [0,1],[1,2],[2,3],[3,0], // bottom edges
     [4,5],[5,6],[6,7],[7,4], // top edges
     [0,4],[1,5],[2,6],[3,7]  // vertical edges
+  ];
+  const out = [];
+  for (const [a,b] of E){ out.push(...p[a], ...p[b]); }
+  return out;
+}
+
+function buildWireAABB(minX, minY, maxX, maxY, minZ, maxZ){
+  const p = [
+    [minX,minY,minZ],[maxX,minY,minZ],[maxX,minY,maxZ],[minX,minY,maxZ],
+    [minX,maxY,minZ],[maxX,maxY,minZ],[maxX,maxY,maxZ],[minX,maxY,maxZ]
+  ];
+  const E = [
+    [0,1],[1,2],[2,3],[3,0],
+    [4,5],[5,6],[6,7],[7,4],
+    [0,4],[1,5],[2,6],[3,7]
   ];
   const out = [];
   for (const [a,b] of E){ out.push(...p[a], ...p[b]); }
