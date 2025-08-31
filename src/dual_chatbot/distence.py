@@ -75,6 +75,8 @@ if the similarity is above 0.8 for the bairro then dont add it and use the exist
 
 
 
+if a relaotor worte Casa, then a lead that writes ["Bangalô", "Casa de alvenaria", "Casa de condomínio", "Casa de praia", "Casa de vila", "Casa geminada", "Casa térrea", "Casas de alto padrão", "Casas em condomínios fechados", "Chalé", "Chácara", "Edícula", "Mansão", "Palafita", "Pau a pique", "Sobrado", "Tiny houses"], or "Casa" should be considered a match.
+
 real_estate_relationships = {
     "Andar corrido": ["Apartamento", "Apartamento padrão"],
     "Apartamento": ["Andar corrido", "Apartamento padrão", "Cobertura", "Duplex", "Flat", "Garden", "Kitnet", "Loft", "Penthouse", "Quitinete", "Studio", "Triplex"],
