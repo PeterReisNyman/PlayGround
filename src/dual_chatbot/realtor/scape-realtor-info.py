@@ -8,6 +8,15 @@ from selenium.common.exceptions import NoSuchElementException, WebDriverExceptio
 with open('property_links.json', 'r') as f:
     links = json.load(f)
 
+# Load existing results if any
+results = {}
+json_file = 'properties_data.json'
+try:
+    with open(json_file, 'r') as f:
+        results = json.load(f)
+except FileNotFoundError:
+    pass
+
 # Function to extract data from a single URL
 def extract_data(url):
     driver = None
@@ -35,12 +44,14 @@ def extract_data(url):
         if driver:
             driver.quit()
 
-# Dictionary to store results {url: data}
-results = {}
+# Filter to only process new links
+new_links = [url for url in links if url not in results]
+
+# Dictionary will be updated incrementally
 
 # Use ThreadPoolExecutor for parallelism (IO-bound; adjust max_workers based on system resources)
 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:  # Limit to 10 to avoid overwhelming the system
-    future_to_url = {executor.submit(extract_data, url): url for url in links}
+    future_to_url = {executor.submit(extract_data, url): url for url in new_links}
     
     for future in concurrent.futures.as_completed(future_to_url):
         url = future_to_url[future]
@@ -48,9 +59,9 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:  # Limit
             results[url] = future.result()
         except Exception as e:
             results[url] = {"error": str(e)}
+        
+        # Save incrementally after each completion
+        with open(json_file, 'w') as f:
+            json.dump(results, f, indent=4)
 
-# Save the results to a new JSON file
-with open('properties_data.json', 'w') as f:
-    json.dump(results, f, indent=4)
-
-print(f"Processed {len(links)} links. Results saved to properties_data.json")
+print(f"Processed {len(new_links)} new links. Total entries in {json_file}: {len(results)}")
