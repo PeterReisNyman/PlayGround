@@ -18,27 +18,27 @@ def extract_info(content):
     address = ""
     description = ""
     
-    # Extract name: \\\"name\\\":\\\"Heiwa Im\u00f3veis\\\"
-    name_match = re.search(r'\\\"name\\\":\\\"(.*?)\\\"', content)
+    # Extract realtor name from account section: \"account\":{\"...\"name\":\"...\"
+    name_match = re.search(r'\\\"account\\\":\{.*?\\\"name\\\":\\\"(.*?)\\\"', content, re.DOTALL)
     if name_match:
-        name = name_match.group(1).replace('\\u00f3', 'ó').replace('\\u00e1', 'á')  # Handle unicode escapes
-    
-    # Extract phones: \\\"phones\\\":\[\"(.*?)\"\]
-    phones_match = re.search(r'\\\"phones\\\":\[(.*?)\]', content)
+        name = name_match.group(1).replace('\\u00f3', 'ó').replace('\\u00e1', 'á').replace('\\u00e9', 'é').replace('\\u00ed', 'í').replace('\\u00e7', 'ç').replace('\\u00f4', 'ô')
+
+    # Extract phones from account section: \"account\":{\"...\"phones\":[...]
+    phones_match = re.search(r'\\\"account\\\":\{.*?\\\"phones\\\":\[(.*?)\]', content, re.DOTALL)
     if phones_match:
         phones_str = phones_match.group(1)
-        phones = [p.strip('"') for p in phones_str.split(',')]
-    
-    # Extract address: \\\"formattedAddress\\\":\\\"(.*?)\"
+        phones = [re.sub(r'[\'\"\\]+', '', p.strip()) for p in phones_str.split(',') if p.strip()]
+
+    # Extract address: \"formattedAddress\":\"...\"
     address_match = re.search(r'\\\"formattedAddress\\\":\\\"(.*?)(?<!\\)\\\"', content)
     if address_match:
-        address = address_match.group(1).replace('\\u00e3', 'ã').replace('\\u00ed', 'í')
-    
-    # Extract description: \\\"description\\\":\\\"(.*?)(?<!\\)\"
-    desc_match = re.search(r'\\\"description\\\":\\\"(.*?)(?<!\\)\\\"', content, re.DOTALL)
+        address = address_match.group(1).replace('\\u00e3', 'ã').replace('\\u00ed', 'í').replace('\\u00e7', 'ç').replace('\\u00e1', 'á').replace('\\u00f3', 'ó').replace('\\u00e9', 'é')
+
+    # Extract description from listing section: \"listing\":{\"...\"description\":\"...\"
+    desc_match = re.search(r'\\\"listing\\\":\{.*?\\\"description\\\":\\\"(.*?)(?<!\\)\\\"', content, re.DOTALL)
     if desc_match:
-        description = desc_match.group(1).replace('\\u003cbr\\u003e', '\n').replace('\\u00e1', 'á').replace('\\u00e3', 'ã').replace('\\u00ed', 'í').replace('\\u00f3', 'ó').replace('\\u00e7', 'ç').replace('\\u00e9', 'é').replace('\\u00c1', 'Á')
-    
+        description = desc_match.group(1).replace('\\u003cbr\\u003e', '\n').replace('\\u00e1', 'á').replace('\\u00e3', 'ã').replace('\\u00ed', 'í').replace('\\u00f3', 'ó').replace('\\u00e7', 'ç').replace('\\u00e9', 'é').replace('\\u00c1', 'Á').replace('\\n', '\n').replace('\\\\n', '\n')
+
     # Check if all info is present
     complete = bool(phones and name and address and description)
     
