@@ -13,11 +13,15 @@ incomplete_urls = []
 
 # Function to extract information from script content
 def extract_info(content):
+    # Guard: ensure we only try regexes on strings/bytes
+    if not isinstance(content, (str, bytes)):
+        return [], "", "", "", False
+
     phones = []
     name = ""
     address = ""
     description = ""
-    
+
     # Extract realtor name from account section: \"account\":{\"...\"name\":\"...\"
     name_match = re.search(r'\\\"account\\\":\{.*?\\\"name\\\":\\\"(.*?)\\\"', content, re.DOTALL)
     if name_match:
@@ -41,7 +45,7 @@ def extract_info(content):
 
     # Check if all info is present
     complete = bool(phones and name and address and description)
-    
+
     return phones, name, address, description, complete
 
 # Process each URL
