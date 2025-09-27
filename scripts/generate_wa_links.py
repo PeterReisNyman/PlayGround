@@ -29,11 +29,14 @@ def build_message(realtor: str, bairro: str) -> str:
     realtor_fragment = realtor if realtor else ""
     bairro_fragment = bairro if bairro else ""
     return (
-        f"""Olá! Sou Alfonso, agente da MRE :) Somos uma empresa multinacional inovando o mercado imobiliário no Brasil.
+        f"""Olá! Sou o Alfonso, presidente da MyRealValuation :) Trabalhamos com captação de imóveis de vendedores exclusivos e qualificados. 
+Curti seu anúncio em {bairro_fragment} e acho que podemos colaborar! 
 
-Vi o seu apartamento na {bairro_fragment}, e achei incrível! Queria te mostrar, como a br.myrealvaluation.com pode garantir em novos clientes vendedores de imóveis exclusivos e qualificados para você.
+O nosso site funciona assim, a gente encontramos vendedores, filtramos, pedimos por fotos do imovel e te enviamos as informações para você aceitar ou recusar. 
 
-É só se cadastrar em br.myrealvaluation.com e marcar os bairros que quer atender. Se tiver qualquer dúvida, pode me mandar mensagem por aqui mesmo ;)
+Se estiver intersado podemos marcar uma ligação?
+
+P.S.: br.myrealvaluation.com
 """
 )
 
