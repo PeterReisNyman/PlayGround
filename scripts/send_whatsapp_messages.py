@@ -8,7 +8,7 @@ import random
 import time
 import webbrowser
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List
+from typing import Dict, Iterable, Iterator, List, Set
 
 import pyautogui
 from urllib.parse import quote
@@ -24,6 +24,7 @@ P.S.: br.myrealvaluation.com"""
 )
 
 DEFAULT_DATA_PATH = Path("outputs") / "119_numbers_with_links.json"
+DEFAULT_SENT_PATH = Path("outputs") / "sent.csv"
 
 
 def extract_bairro(address: str) -> str:
@@ -90,6 +91,8 @@ def send_messages(
     random_extra: float = 3.0,
     dry_run: bool = False,
     browser_name: str = "chrome",
+    sent_numbers: Set[str],
+    sent_log_path: Path,
 ) -> None:
     browser = webbrowser.get(browser_name)
 
@@ -97,6 +100,12 @@ def send_messages(
         url = contact["url"]
         message = contact["message"]
         number = contact["number"]
+
+        if number in sent_numbers:
+            print(
+                f"Skipping +55 {number}: already recorded in '{sent_log_path}'."
+            )
+            continue
         print(f"Opening chat for +55 {number} -> bairro='{contact['bairro']}'")
 
         if dry_run:
@@ -112,6 +121,8 @@ def send_messages(
             print("[dry-run] Would press Enter to send the message.")
         else:
             pyautogui.press("enter")
+            append_sent_number(sent_log_path, number)
+            sent_numbers.add(number)
 
         print("Done. Moving to the next contact.\n")
 
@@ -129,6 +140,20 @@ def load_contacts(path: Path) -> Dict[str, List[Dict]]:
 
     return data
 
+
+
+def load_sent_numbers(path: Path) -> Set[str]:
+    if not path.exists():
+        return set()
+
+    with path.open("r", encoding="utf-8") as fp:
+        return {line.strip() for line in fp if line.strip()}
+
+
+def append_sent_number(path: Path, number: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fp:
+        fp.write(f"{number}\n")
 
 
 def main() -> None:
@@ -160,6 +185,12 @@ def main() -> None:
         help="Browser key to use with webbrowser.get (default: chrome).",
     )
     parser.add_argument(
+        "--sent-log",
+        type=Path,
+        default=DEFAULT_SENT_PATH,
+        help="CSV file used to track numbers that already received a message.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Do not open the browser or send messages; just print actions.",
@@ -167,6 +198,7 @@ def main() -> None:
 
     args = parser.parse_args()
     data = load_contacts(args.data)
+    sent_numbers = load_sent_numbers(args.sent_log)
     contacts = iter_unique_numbers(data)
     send_messages(
         contacts,
@@ -174,6 +206,8 @@ def main() -> None:
         random_extra=args.extra,
         dry_run=args.dry_run,
         browser_name=args.browser,
+        sent_numbers=sent_numbers,
+        sent_log_path=args.sent_log,
     )
 
 
