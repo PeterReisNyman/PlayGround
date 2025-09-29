@@ -50,6 +50,19 @@ def clean_digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit())
 
 
+def normalize_with_country_code(number: str) -> str:
+    """Return the numeric phone string prefixed with Brazil's country code."""
+
+    digits = clean_digits(number)
+    if not digits:
+        return ""
+
+    if digits.startswith("55"):
+        return digits
+
+    return f"55{digits}"
+
+
 def iter_unique_numbers(data: Dict[str, List[Dict]]) -> Iterator[Dict[str, str]]:
     for digits, occurrences in sorted(data.items()):
         number = clean_digits(digits)
@@ -78,6 +91,7 @@ def iter_unique_numbers(data: Dict[str, List[Dict]]) -> Iterator[Dict[str, str]]
 
         yield {
             "number": number,
+            "full_number": normalize_with_country_code(number),
             "bairro": bairro_text,
             "message": message,
             "url": whatsapp_link,
@@ -100,10 +114,11 @@ def send_messages(
         url = contact["url"]
         message = contact["message"]
         number = contact["number"]
+        full_number = contact.get("full_number") or normalize_with_country_code(number)
 
-        if number in sent_numbers:
+        if full_number in sent_numbers:
             print(
-                f"Skipping +55 {number}: already recorded in '{sent_log_path}'."
+                f"Skipping +{full_number}: already recorded in '{sent_log_path}'."
             )
             continue
         print(f"Opening chat for +55 {number} -> bairro='{contact['bairro']}'")
@@ -121,8 +136,8 @@ def send_messages(
             print("[dry-run] Would press Enter to send the message.")
         else:
             pyautogui.press("enter")
-            append_sent_number(sent_log_path, number)
-            sent_numbers.add(number)
+            append_sent_number(sent_log_path, full_number)
+            sent_numbers.add(full_number)
 
         print("Done. Moving to the next contact.\n")
 
@@ -147,7 +162,11 @@ def load_sent_numbers(path: Path) -> Set[str]:
         return set()
 
     with path.open("r", encoding="utf-8") as fp:
-        return {line.strip() for line in fp if line.strip()}
+        return {
+            normalized
+            for line in fp
+            if (normalized := normalize_with_country_code(line.strip()))
+        }
 
 
 def append_sent_number(path: Path, number: str) -> None:
