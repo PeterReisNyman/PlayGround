@@ -101,7 +101,7 @@ def iter_unique_numbers(data: Dict[str, List[Dict]]) -> Iterator[Dict[str, str]]
 def send_messages(
     contacts: Iterable[Dict[str, str]],
     *,
-    wait_seconds: float = 5.0,
+    wait_seconds: float = 7.0,
     random_extra: float = 3.0,
     dry_run: bool = False,
     browser_name: str = "chrome",
