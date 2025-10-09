@@ -31,34 +31,48 @@ def extract_info(content):
     address = ""
     description = ""
 
-    # Try OLD format first (\"account\" structure)
+    # Try OLD format first (with escaped quotes: \"account\")
     name_match = re.search(r'\\"account\\":\{.*?\\"name\\":\\"(.*?)\\"', content, re.DOTALL)
+    if not name_match:
+        # Also try without escaped quotes: "account"
+        name_match = re.search(r'"account":\{.*?"name":"(.*?)"', content, re.DOTALL)
     if name_match:
         name = decode_unicode(name_match.group(1))
 
     phones_match = re.search(r'\\"account\\":\{.*?\\"phones\\":\[(.*?)\]', content, re.DOTALL)
+    if not phones_match:
+        # Also try without escaped quotes
+        phones_match = re.search(r'"account":\{.*?"phones":\[(.*?)\]', content, re.DOTALL)
     if phones_match:
         phones_str = phones_match.group(1)
         phones = [re.sub(r'[\'\"\\\\]+', '', p.strip()) for p in phones_str.split(',') if p.strip()]
 
     address_match = re.search(r'\\"formattedAddress\\":\\"(.*?)(?<!\\\\)\\"', content)
+    if not address_match:
+        address_match = re.search(r'"formattedAddress":"(.*?)"', content)
     if address_match:
         address = decode_unicode(address_match.group(1))
 
     desc_match = re.search(r'\\"listing\\":\{.*?\\"description\\":\\"(.*?)(?<!\\\\)\\"', content, re.DOTALL)
+    if not desc_match:
+        desc_match = re.search(r'"listing":\{.*?"description":"(.*?)"', content, re.DOTALL)
     if desc_match:
         description = decode_unicode(desc_match.group(1))
 
     # If OLD format didn't work, try NEW format (schema.org Product structure)
     if not description:
-        # New format: "description":"..."
+        # New format: "description":"..." (try both escaped and unescaped)
         desc_new = re.search(r'\\"description\\":\\"(.*?)\\"', content, re.DOTALL)
+        if not desc_new:
+            desc_new = re.search(r'"description":"(.*?)"', content, re.DOTALL)
         if desc_new:
             description = decode_unicode(desc_new.group(1))
 
     if not address:
         # New format: "name":"Imóvel em <neighborhood>, <city> - <state>"
         name_new = re.search(r'\\"name\\":\\"Im.vel em (.*?)\\"', content)
+        if not name_new:
+            name_new = re.search(r'"name":"Im.vel em (.*?)"', content)
         if name_new:
             address = decode_unicode(name_new.group(1))
 
@@ -66,11 +80,15 @@ def extract_info(content):
     # Looking for patterns like "realEstate":{"name":"...","phones":...}
     if not name:
         re_name = re.search(r'\\"realEstate\\":\{.*?\\"name\\":\\"(.*?)\\"', content, re.DOTALL)
+        if not re_name:
+            re_name = re.search(r'"realEstate":\{.*?"name":"(.*?)"', content, re.DOTALL)
         if re_name:
             name = decode_unicode(re_name.group(1))
 
     if not phones:
         re_phones = re.search(r'\\"realEstate\\":\{.*?\\"phoneNumbers\\":\[(.*?)\]', content, re.DOTALL)
+        if not re_phones:
+            re_phones = re.search(r'"realEstate":\{.*?"phoneNumbers":\[(.*?)\]', content, re.DOTALL)
         if re_phones:
             phones_str = re_phones.group(1)
             phones = [re.sub(r'[\'\"\\\\]+', '', p.strip()) for p in phones_str.split(',') if p.strip()]
