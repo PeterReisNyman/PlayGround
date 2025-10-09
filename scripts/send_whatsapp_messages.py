@@ -112,7 +112,7 @@ def send_messages(
     count = 0
     for contact in contacts:
         count += 1
-        if count == 305:
+        if count == 500:
             break
         url = contact["url"]
         message = contact["message"]
