@@ -1,9 +1,12 @@
 import json
 import re
+import time
 import concurrent.futures
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException, WebDriverException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException
 
 # Function to decode unicode escapes
 def decode_unicode(text):
@@ -83,10 +86,24 @@ def scrape_and_extract(url):
     try:
         # Create a new driver instance for each thread
         driver = webdriver.Chrome()
+        driver.implicitly_wait(10)  # Wait up to 10 seconds for elements to appear
         driver.get(url)
 
+        # Wait for page to load
+        time.sleep(3)  # Give the page time to fully render
+
+        # Wait for body to be present
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+
         # Try to locate the script tag (try script[15] through script[25])
-        script_content = None
+        # Combine results from all script tags
+        combined_phones = []
+        combined_name = ""
+        combined_address = ""
+        combined_description = ""
+
         for script_index in range(15, 26):
             try:
                 script_elem = driver.find_element(By.XPATH, f"/html/body/script[{script_index}]")
@@ -95,19 +112,27 @@ def scrape_and_extract(url):
                 # Check if we got useful content (try to extract info)
                 phones, name, address, description, complete = extract_info(script_content)
 
-                # If we found any data, use this script element
-                if phones or name or address or description:
-                    return [phones, name, address, description, complete]
+                # Combine results - only overwrite if we don't have it yet or new one is better
+                if phones and not combined_phones:
+                    combined_phones = phones
+                if name and not combined_name:
+                    combined_name = name
+                if address and not combined_address:
+                    combined_address = address
+                if description and not combined_description:
+                    combined_description = description
+
+                # If we have complete data, we can stop early
+                if combined_phones and combined_name and combined_address and combined_description:
+                    break
 
             except NoSuchElementException:
                 continue
 
-        # If we got here, try with whatever content we found last (or return empty)
-        if script_content:
-            phones, name, address, description, complete = extract_info(script_content)
-            return [phones, name, address, description, complete]
-        else:
-            return [[], "", "", "", False]
+        # Check if all info is present
+        complete = bool(combined_phones and combined_name and combined_address and combined_description)
+
+        return [combined_phones, combined_name, combined_address, combined_description, complete]
 
     except WebDriverException as e:
         print(f"Error scraping {url}: {str(e)}")
