@@ -109,8 +109,11 @@ def send_messages(
     sent_log_path: Path,
 ) -> None:
     browser = webbrowser.get(browser_name)
-
+    count = 0
     for contact in contacts:
+        count += 1
+        if count == 305:
+            break
         url = contact["url"]
         message = contact["message"]
         number = contact["number"]
