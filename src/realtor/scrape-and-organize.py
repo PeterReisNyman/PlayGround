@@ -85,17 +85,30 @@ def scrape_and_extract(url):
         driver = webdriver.Chrome()
         driver.get(url)
 
-        # Locate the script tag
-        script_elem = driver.find_element(By.XPATH, "/html/body/script[19]")
-        script_content = script_elem.get_attribute('innerHTML')
+        # Try to locate the script tag (try script[15] through script[25])
+        script_content = None
+        for script_index in range(15, 26):
+            try:
+                script_elem = driver.find_element(By.XPATH, f"/html/body/script[{script_index}]")
+                script_content = script_elem.get_attribute('innerHTML')
 
-        # Extract structured information
-        phones, name, address, description, complete = extract_info(script_content)
+                # Check if we got useful content (try to extract info)
+                phones, name, address, description, complete = extract_info(script_content)
 
-        return [phones, name, address, description, complete]
+                # If we found any data, use this script element
+                if phones or name or address or description:
+                    return [phones, name, address, description, complete]
 
-    except NoSuchElementException:
-        return [[], "", "", "", False]
+            except NoSuchElementException:
+                continue
+
+        # If we got here, try with whatever content we found last (or return empty)
+        if script_content:
+            phones, name, address, description, complete = extract_info(script_content)
+            return [phones, name, address, description, complete]
+        else:
+            return [[], "", "", "", False]
+
     except WebDriverException as e:
         print(f"Error scraping {url}: {str(e)}")
         return [[], "", "", "", False]
