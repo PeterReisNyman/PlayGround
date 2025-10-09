@@ -26,7 +26,7 @@ def extract_data(url):
         driver.get(url)
         
         # Locate the script tag
-        script_elem = driver.find_element(By.XPATH, "/html/body/script[18]")
+        script_elem = driver.find_element(By.XPATH, "/html/body/script[19]")
         script_content = script_elem.get_attribute('innerHTML')  # or 'textContent'
         
         # Attempt to parse as JSON (assuming it's JSON data)

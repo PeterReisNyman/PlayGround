@@ -11,6 +11,18 @@ results = {}
 # List to store incomplete URLs
 incomplete_urls = []
 
+# Function to decode unicode escapes
+def decode_unicode(text):
+    """Decode common Portuguese unicode escapes"""
+    replacements = {
+        '\\u00e1': 'á', '\\u00e3': 'ã', '\\u00e9': 'é', '\\u00ed': 'í',
+        '\\u00f3': 'ó', '\\u00f4': 'ô', '\\u00e7': 'ç', '\\u00c1': 'Á',
+        '\\u003cbr\\u003e': '\n', '\\n': '\n', '\\\\n': '\n', '\\\\': ''
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
 # Function to extract information from script content
 def extract_info(content):
     # Guard: ensure we only try regexes on strings/bytes
@@ -22,26 +34,49 @@ def extract_info(content):
     address = ""
     description = ""
 
-    # Extract realtor name from account section: \"account\":{\"...\"name\":\"...\"
+    # Try OLD format first (\"account\" structure)
     name_match = re.search(r'\\\"account\\\":\{.*?\\\"name\\\":\\\"(.*?)\\\"', content, re.DOTALL)
     if name_match:
-        name = name_match.group(1).replace('\\u00f3', 'ó').replace('\\u00e1', 'á').replace('\\u00e9', 'é').replace('\\u00ed', 'í').replace('\\u00e7', 'ç').replace('\\u00f4', 'ô')
+        name = decode_unicode(name_match.group(1))
 
-    # Extract phones from account section: \"account\":{\"...\"phones\":[...]
     phones_match = re.search(r'\\\"account\\\":\{.*?\\\"phones\\\":\[(.*?)\]', content, re.DOTALL)
     if phones_match:
         phones_str = phones_match.group(1)
         phones = [re.sub(r'[\'\"\\]+', '', p.strip()) for p in phones_str.split(',') if p.strip()]
 
-    # Extract address: \"formattedAddress\":\"...\"
     address_match = re.search(r'\\\"formattedAddress\\\":\\\"(.*?)(?<!\\)\\\"', content)
     if address_match:
-        address = address_match.group(1).replace('\\u00e3', 'ã').replace('\\u00ed', 'í').replace('\\u00e7', 'ç').replace('\\u00e1', 'á').replace('\\u00f3', 'ó').replace('\\u00e9', 'é')
+        address = decode_unicode(address_match.group(1))
 
-    # Extract description from listing section: \"listing\":{\"...\"description\":\"...\"
     desc_match = re.search(r'\\\"listing\\\":\{.*?\\\"description\\\":\\\"(.*?)(?<!\\)\\\"', content, re.DOTALL)
     if desc_match:
-        description = desc_match.group(1).replace('\\u003cbr\\u003e', '\n').replace('\\u00e1', 'á').replace('\\u00e3', 'ã').replace('\\u00ed', 'í').replace('\\u00f3', 'ó').replace('\\u00e7', 'ç').replace('\\u00e9', 'é').replace('\\u00c1', 'Á').replace('\\n', '\n').replace('\\\\n', '\n')
+        description = decode_unicode(desc_match.group(1))
+
+    # If OLD format didn't work, try NEW format (schema.org Product structure)
+    if not description:
+        # New format: "description":"..."
+        desc_new = re.search(r'\\\"description\\\":\\\"(.*?)\\\"', content, re.DOTALL)
+        if desc_new:
+            description = decode_unicode(desc_new.group(1))
+
+    if not address:
+        # New format: "name":"Imóvel em <neighborhood>, <city> - <state>"
+        name_new = re.search(r'\\\"name\\\":\\\"Im.vel em (.*?)\\\"', content)
+        if name_new:
+            address = decode_unicode(name_new.group(1))
+
+    # For new format, check if there's account info in different location
+    # Looking for patterns like "realEstate":{"name":"...","phones":...}
+    if not name:
+        re_name = re.search(r'\\\"realEstate\\\":\{.*?\\\"name\\\":\\\"(.*?)\\\"', content, re.DOTALL)
+        if re_name:
+            name = decode_unicode(re_name.group(1))
+
+    if not phones:
+        re_phones = re.search(r'\\\"realEstate\\\":\{.*?\\\"phoneNumbers\\\":\[(.*?)\]', content, re.DOTALL)
+        if re_phones:
+            phones_str = re_phones.group(1)
+            phones = [re.sub(r'[\'\"\\]+', '', p.strip()) for p in phones_str.split(',') if p.strip()]
 
     # Check if all info is present
     complete = bool(phones and name and address and description)
