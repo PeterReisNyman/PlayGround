@@ -66,7 +66,7 @@ def normalize_with_country_code(number: str) -> str:
 def iter_unique_numbers(data: Dict[str, List[Dict]]) -> Iterator[Dict[str, str]]:
     for digits, occurrences in sorted(data.items()):
         number = clean_digits(digits)
-        if not number.startswith("119"):
+        if not number.startswith("489"):
             continue
 
         bairro_fragment = ""
@@ -86,7 +86,7 @@ def iter_unique_numbers(data: Dict[str, List[Dict]]) -> Iterator[Dict[str, str]]
         whatsapp_link = f"https://wa.me/55{number}?text={encoded_message}"
 
         # Ensure the resulting link respects the requested prefix.
-        if not whatsapp_link.split("/")[-1].startswith("5511"):
+        if not whatsapp_link.split("/")[-1].startswith("5548"):
             continue
 
         yield {
