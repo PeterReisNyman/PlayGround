@@ -10,7 +10,7 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 driver = webdriver.Chrome()
 
 # Base URL
-url = "https://www.zapimoveis.com.br/venda/?transacao=venda&viewport=-46.369569440608124%2C-23.374804784045992%7C-46.84283055939188%2C-23.808511215954006"
+url = "https://www.zapimoveis.com.br/venda/?transacao=venda&viewport=-48.399371914016385%2C-27.467258833201573%7C-48.6362646142117%2C-27.74563430843269"
 driver.get(url)
 
 # Load existing links if any
