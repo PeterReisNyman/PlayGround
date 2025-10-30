@@ -54,18 +54,14 @@ while True:
     # Save updated links to JSON
     with open(json_file, 'w') as f:
         json.dump(list(links), f, indent=4)
+        print(f"Saved {len(links)} links to {json_file}")
 
     if not new_links_found and page_count > 0:
         print("No new links found; possibly end of pages.")
         break
 
     # Click the next button
-    if is_first:
-        next_xpath = "/html/body/section/div/div[3]/div[4]/div[1]/div/nav/div/button[2]"
-        is_first = False
-    else:
-        next_xpath = "/html/body/section/div/div[3]/div[4]/div[1]/div/nav/div/button[3]"
-
+    next_xpath = "/html/body/section/div/div[3]/div[4]/div[1]/section/div/a[7]"
     try:
         next_btn = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, next_xpath))
