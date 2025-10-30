@@ -23,7 +23,7 @@ Se tiver interesse, podemos marcar uma breve ligação?
 P.S.: br.myrealvaluation.com"""
 )
 
-DEFAULT_DATA_PATH = Path("outputs") / "119_numbers_with_links.json"
+DEFAULT_DATA_PATH = Path("outputs") / "489_numbers_with_links.json"
 DEFAULT_SENT_PATH = Path("outputs") / "sent.csv"
 
 
@@ -148,7 +148,7 @@ def send_messages(
 
 def load_contacts(path: Path) -> Dict[str, List[Dict]]:
     if not path.exists():
-        raise FileNotFoundError(f"Could not find {path}. Generate it with extract_119_numbers.py first.")
+        raise FileNotFoundError(f"Could not find {path}. Generate it with extract_489_numbers.py first.")
 
     with path.open("r", encoding="utf-8") as fp:
         data = json.load(fp)
@@ -180,13 +180,13 @@ def append_sent_number(path: Path, number: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Send WhatsApp messages to each unique number from 119_numbers_with_links.json.",
+        description="Send WhatsApp messages to each unique number from 489_numbers_with_links.json.",
     )
     parser.add_argument(
         "--data",
         type=Path,
         default=DEFAULT_DATA_PATH,
-        help="Path to outputs/119_numbers_with_links.json.",
+        help="Path to outputs/489_numbers_with_links.json.",
     )
     parser.add_argument(
         "--wait",

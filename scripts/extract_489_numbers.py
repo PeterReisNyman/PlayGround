@@ -14,7 +14,7 @@ def main(input_path: Path, output_path: Path) -> None:
     with input_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Map numbers starting with 119 -> list of listings where they appear
+    # Map numbers starting with 489 -> list of listings where they appear
     results: dict[str, list] = {}
 
     for listing_url, payload in data.items():
@@ -27,7 +27,7 @@ def main(input_path: Path, output_path: Path) -> None:
 
         for phone in phones:
             digits = clean_digits(phone)
-            if digits.startswith("119"):
+            if digits.startswith("489"):
                 results.setdefault(digits, []).append(
                     {
                         "listing_url": listing_url,
@@ -50,11 +50,11 @@ def main(input_path: Path, output_path: Path) -> None:
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parents[1]
     default_input = repo_root / "organized_data.json"
-    default_output = repo_root / "outputs" / "119_numbers_with_links.json"
+    default_output = repo_root / "outputs" / "489_numbers_with_links.json"
 
     parser = argparse.ArgumentParser(
         description=(
-            "Extract all phone numbers starting with 119 from organized_data.json, "
+            "Extract all phone numbers starting with 489 from organized_data.json, "
             "including each occurrence, and add a WhatsApp link."
         )
     )
