@@ -316,6 +316,7 @@ def find_closest(target_embedding, embeddings_dict, exclude=[]):
     return max(similarities, key=similarities.get)
 
 # Example
-target_emb = embeddings['Brazilian'] - embeddings['rainforest']
-closest = find_closest(target_emb, embeddings, exclude=['Brazilian', 'Brazil', 'Irish', 'South America'])#'large', 'big', 'huge'])
+target_emb =  embeddings['fare'] + embeddings['yellow']
+closest = find_closest(target_emb, embeddings, exclude=['fare', 'yellow', 'transport', 'red', 'vehicle', 'transfer'])
+
 print(closest)
