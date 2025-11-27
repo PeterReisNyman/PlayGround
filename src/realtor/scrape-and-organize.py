@@ -122,7 +122,7 @@ def scrape_and_extract(url):
         combined_address = ""
         combined_description = ""
 
-        for script_index in range(15, 30):
+        for script_index in range(20, 35):
             try:
                 script_elem = driver.find_element(By.XPATH, f"/html/body/script[{script_index}]")
                 script_content = script_elem.get_attribute('innerHTML')
